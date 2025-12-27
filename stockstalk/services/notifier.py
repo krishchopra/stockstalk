@@ -113,8 +113,16 @@ class NotificationService:
             logger.debug("No phone numbers configured for SMS notifications")
             return False
 
-        # Placeholder for SMS functionality
-        # In production, this would use Twilio or similar service
+        # TODO: Implement actual SMS sending via Twilio
+        # This is currently a placeholder that only logs messages.
+        # To enable SMS:
+        # 1. Install twilio: pip install twilio
+        # 2. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_PHONE_NUMBER env vars
+        # 3. Implement actual SMS sending using Twilio client
+        logger.warning(
+            "SMS notifications are not yet implemented. "
+            "Messages are being logged instead of sent."
+        )
         for phone_number in self.config.phone_numbers:
             logger.info(f"Would send SMS to {phone_number}: {result.message}")
 

@@ -70,7 +70,7 @@ class MACDIndicator(BaseIndicator):
             signal_line = np.mean(macd_values[-signal_period:])
 
         # Check for crossover
-        if len(macd_values) > 1:
+        if len(macd_values) > signal_period:
             prev_macd = macd_values[-2]
             prev_signal = np.mean(macd_values[-signal_period - 1 : -1])
 

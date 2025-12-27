@@ -40,10 +40,11 @@ def create_test_historical_data(
     """Create test historical data."""
     dates = [datetime.now() - timedelta(days=i) for i in range(days, 0, -1)]
 
-    # Create realistic price movements
+    # Create realistic price movements with fixed seed for reproducibility
+    rng = np.random.RandomState(42)
     prices = [base_price]
     for _ in range(days - 1):
-        change = np.random.normal(0, 2)  # Random walk
+        change = rng.normal(0, 2)  # Random walk
         prices.append(max(prices[-1] + change, 1.0))
 
     return HistoricalData(

@@ -52,7 +52,7 @@ class VolumeSpikeIndicator(BaseIndicator):
         )
 
         # Calculate signal strength based on volume ratio
-        signal_strength = min((volume_ratio - 1) / spike_threshold, 1.0)
+        signal_strength = max(0.0, min((volume_ratio - 1) / spike_threshold, 1.0))
 
         # Generate message
         if is_spike:

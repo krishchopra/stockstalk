@@ -157,10 +157,17 @@ def handle_sms() -> tuple[dict[str, str] | str, int]:
             try:
                 data_fetcher = StockDataFetcher()
                 stock_data = data_fetcher.get_current_data(symbol)
-                response_text = (
-                    f"{symbol}: ${stock_data.current_price:.2f} "
-                    f"({((stock_data.current_price - stock_data.previous_close) / stock_data.previous_close * 100):+.2f}%)"
-                )
+                if stock_data.previous_close > 0:
+                    pct_change = (
+                        (stock_data.current_price - stock_data.previous_close)
+                        / stock_data.previous_close
+                        * 100
+                    )
+                    response_text = (
+                        f"{symbol}: ${stock_data.current_price:.2f} " f"({pct_change:+.2f}%)"
+                    )
+                else:
+                    response_text = f"{symbol}: ${stock_data.current_price:.2f}"
                 return _create_twiml_response(response_text)
             except Exception as e:
                 return _create_twiml_response(f"Error fetching {symbol}: {str(e)}")
