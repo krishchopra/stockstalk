@@ -145,7 +145,9 @@ class TerminalUI:
         print("Configure Notifications")
         print("=" * 50)
 
-        print(f"\nCurrent Beeper Webhook URL: {self.config.notification_config.beeper_webhook_url or 'Not set'}")
+        print(
+            f"\nCurrent Beeper Webhook URL: {self.config.notification_config.beeper_webhook_url or 'Not set'}"
+        )
         update_webhook = input("Update webhook URL? (y/n): ").strip().lower()
         if update_webhook == "y":
             webhook = input("Enter Beeper webhook URL: ").strip()
@@ -153,7 +155,9 @@ class TerminalUI:
                 self.config.notification_config.beeper_webhook_url = webhook
                 print("✓ Webhook URL updated.")
 
-        print(f"\nCurrent phone numbers: {', '.join(self.config.notification_config.phone_numbers) or 'None'}")
+        print(
+            f"\nCurrent phone numbers: {', '.join(self.config.notification_config.phone_numbers) or 'None'}"
+        )
         update_phones = input("Update phone numbers? (y/n): ").strip().lower()
         if update_phones == "y":
             phones = input("Enter phone numbers (comma-separated): ").strip()

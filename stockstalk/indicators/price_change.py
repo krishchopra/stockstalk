@@ -16,9 +16,7 @@ class PriceChangeIndicator(BaseIndicator):
         """Return the name of the indicator."""
         return "Price_Change"
 
-    def analyze(
-        self, current_data: StockData, historical_data: HistoricalData
-    ) -> IndicatorResult:
+    def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         """Calculate price change and check for significant movements."""
         significant_drop_pct = self.get_param("significant_drop_pct", -5.0)
         significant_gain_pct = self.get_param("significant_gain_pct", 5.0)
@@ -32,9 +30,7 @@ class PriceChangeIndicator(BaseIndicator):
 
         # Calculate intraday change
         intraday_change_pct = (
-            (current_data.current_price - current_data.open_price)
-            / current_data.open_price
-            * 100
+            (current_data.current_price - current_data.open_price) / current_data.open_price * 100
         )
 
         # Determine if triggered

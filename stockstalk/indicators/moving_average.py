@@ -20,9 +20,7 @@ class MovingAverageCrossoverIndicator(BaseIndicator):
         """Return the name of the indicator."""
         return "MA_Crossover"
 
-    def analyze(
-        self, current_data: StockData, historical_data: HistoricalData
-    ) -> IndicatorResult:
+    def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         """Calculate moving average crossover and check for signals."""
         short_period = self.get_param("short_period", 10)
         long_period = self.get_param("long_period", 50)

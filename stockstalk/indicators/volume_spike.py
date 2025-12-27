@@ -19,9 +19,7 @@ class VolumeSpikeIndicator(BaseIndicator):
         """Return the name of the indicator."""
         return "Volume_Spike"
 
-    def analyze(
-        self, current_data: StockData, historical_data: HistoricalData
-    ) -> IndicatorResult:
+    def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         """Detect volume spikes and assess their significance."""
         lookback_period = self.get_param("lookback_period", 20)
         spike_threshold = self.get_param("spike_threshold", 2.0)  # 2x average
@@ -83,9 +81,7 @@ class VolumeSpikeIndicator(BaseIndicator):
                 )
                 priority = AlertPriority.MEDIUM
         else:
-            message = (
-                f"{current_data.symbol} volume is normal at {volume_ratio:.1f}x average"
-            )
+            message = f"{current_data.symbol} volume is normal at {volume_ratio:.1f}x average"
             priority = AlertPriority.LOW
 
         return IndicatorResult(

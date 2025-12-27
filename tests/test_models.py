@@ -25,7 +25,7 @@ def test_stock_data_creation() -> None:
         volume=1000000,
         previous_close=149.0,
     )
-    
+
     assert stock.symbol == "AAPL"
     assert stock.current_price == 150.0
     assert stock.volume == 1000000
@@ -42,7 +42,7 @@ def test_stock_data_symbol_normalization() -> None:
         volume=1000000,
         previous_close=149.0,
     )
-    
+
     assert stock.symbol == "AAPL"
 
 
@@ -70,7 +70,7 @@ def test_indicator_result_creation() -> None:
         message="RSI is oversold",
         priority=AlertPriority.HIGH,
     )
-    
+
     assert result.indicator_name == "RSI"
     assert result.is_triggered is True
     assert result.signal_strength == 0.8
@@ -84,7 +84,7 @@ def test_watchlist_item_creation() -> None:
         enabled_indicators=["RSI", "MACD"],
         custom_params={"rsi_period": 14},
     )
-    
+
     assert item.symbol == "MSFT"
     assert len(item.enabled_indicators) == 2
     assert item.custom_params["rsi_period"] == 14
@@ -93,7 +93,7 @@ def test_watchlist_item_creation() -> None:
 def test_notification_config_defaults() -> None:
     """Test NotificationConfig with defaults."""
     config = NotificationConfig()
-    
+
     assert config.phone_numbers == []
     assert config.beeper_webhook_url is None
     assert config.min_priority == AlertPriority.MEDIUM
@@ -107,7 +107,7 @@ def test_app_config_creation() -> None:
         ],
         check_interval_minutes=15,
     )
-    
+
     assert len(config.watchlist) == 1
     assert config.check_interval_minutes == 15
     assert config.data_lookback_days == 30  # default

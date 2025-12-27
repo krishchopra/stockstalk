@@ -20,9 +20,7 @@ class BaseIndicator(ABC):
         pass
 
     @abstractmethod
-    def analyze(
-        self, current_data: StockData, historical_data: HistoricalData
-    ) -> IndicatorResult:
+    def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         """
         Analyze stock data and return indicator result.
 

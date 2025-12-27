@@ -43,12 +43,8 @@ class IndicatorResult(BaseModel):
     symbol: str = Field(..., description="Stock ticker symbol")
     timestamp: datetime = Field(default_factory=datetime.now)
     is_triggered: bool = Field(..., description="Whether the indicator triggered")
-    priority: AlertPriority = Field(
-        default=AlertPriority.MEDIUM, description="Alert priority"
-    )
-    signal_strength: float = Field(
-        ..., ge=0, le=1, description="Signal strength (0-1)"
-    )
+    priority: AlertPriority = Field(default=AlertPriority.MEDIUM, description="Alert priority")
+    signal_strength: float = Field(..., ge=0, le=1, description="Signal strength (0-1)")
     message: str = Field(..., description="Human-readable message")
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Additional indicator-specific data"
@@ -58,12 +54,8 @@ class IndicatorResult(BaseModel):
 class NotificationConfig(BaseModel):
     """Configuration for notifications."""
 
-    phone_numbers: list[str] = Field(
-        default_factory=list, description="Phone numbers to notify"
-    )
-    beeper_webhook_url: str | None = Field(
-        None, description="Beeper webhook URL"
-    )
+    phone_numbers: list[str] = Field(default_factory=list, description="Phone numbers to notify")
+    beeper_webhook_url: str | None = Field(None, description="Beeper webhook URL")
     min_priority: AlertPriority = Field(
         default=AlertPriority.MEDIUM,
         description="Minimum priority to trigger notification",
@@ -91,12 +83,8 @@ class WatchlistItem(BaseModel):
 class AppConfig(BaseModel):
     """Application configuration."""
 
-    watchlist: list[WatchlistItem] = Field(
-        default_factory=list, description="Stocks to monitor"
-    )
-    notification_config: NotificationConfig = Field(
-        default_factory=NotificationConfig
-    )
+    watchlist: list[WatchlistItem] = Field(default_factory=list, description="Stocks to monitor")
+    notification_config: NotificationConfig = Field(default_factory=NotificationConfig)
     check_interval_minutes: int = Field(
         default=15, ge=1, description="How often to check stocks (minutes)"
     )

@@ -99,6 +99,4 @@ class StockDataFetcher:
                 volumes=volumes,
             )
         except Exception as e:
-            raise ValueError(
-                f"Failed to fetch historical data for {symbol}: {str(e)}"
-            ) from e
+            raise ValueError(f"Failed to fetch historical data for {symbol}: {str(e)}") from e

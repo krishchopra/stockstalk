@@ -28,9 +28,7 @@ class MACDIndicator(BaseIndicator):
             ema = (price * multiplier) + (ema * (1 - multiplier))
         return float(ema)
 
-    def analyze(
-        self, current_data: StockData, historical_data: HistoricalData
-    ) -> IndicatorResult:
+    def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         """Calculate MACD and check for crossover signals."""
         fast_period = self.get_param("fast_period", 12)
         slow_period = self.get_param("slow_period", 26)
@@ -61,12 +59,15 @@ class MACDIndicator(BaseIndicator):
         # For simplicity, we'll use a moving average of recent MACD values
         # In a real implementation, you'd calculate MACD for each historical point
         macd_values = []
-        for i in range(signal_period, len(prices) + 1):
+        for i in range(max(slow_period, signal_period), len(prices) + 1):
             f_ema = self._calculate_ema(prices[i - fast_period : i], fast_period)
             s_ema = self._calculate_ema(prices[i - slow_period : i], slow_period)
             macd_values.append(f_ema - s_ema)
 
-        signal_line = np.mean(macd_values[-signal_period:])
+        if len(macd_values) < signal_period:
+            signal_line = macd
+        else:
+            signal_line = np.mean(macd_values[-signal_period:])
 
         # Check for crossover
         if len(macd_values) > 1:

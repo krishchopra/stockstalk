@@ -46,9 +46,7 @@ class IndicatorRegistry:
         """
         if name not in cls._indicators:
             available = ", ".join(cls._indicators.keys())
-            raise ValueError(
-                f"Indicator '{name}' not found. Available: {available}"
-            )
+            raise ValueError(f"Indicator '{name}' not found. Available: {available}")
 
         return cls._indicators[name](**params)
 

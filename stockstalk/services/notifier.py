@@ -86,9 +86,7 @@ class NotificationService:
             )
             response.raise_for_status()
 
-            logger.info(
-                f"Sent notification for {result.symbol} via Beeper: {result.message}"
-            )
+            logger.info(f"Sent notification for {result.symbol} via Beeper: {result.message}")
             return True
 
         except requests.exceptions.RequestException as e:
@@ -118,9 +116,7 @@ class NotificationService:
         # Placeholder for SMS functionality
         # In production, this would use Twilio or similar service
         for phone_number in self.config.phone_numbers:
-            logger.info(
-                f"Would send SMS to {phone_number}: {result.message}"
-            )
+            logger.info(f"Would send SMS to {phone_number}: {result.message}")
 
         return True
 

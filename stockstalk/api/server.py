@@ -177,9 +177,7 @@ def handle_sms() -> tuple[dict[str, str] | str, int]:
         elif command == "ANALYZE" and len(parts) > 1:
             symbol = parts[1]
             # This would trigger a full analysis and send results
-            return _create_twiml_response(
-                f"Analyzing {symbol}... Results will be sent shortly."
-            )
+            return _create_twiml_response(f"Analyzing {symbol}... Results will be sent shortly.")
 
         else:
             return _create_twiml_response(

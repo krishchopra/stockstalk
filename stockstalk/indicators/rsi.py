@@ -20,9 +20,7 @@ class RSIIndicator(BaseIndicator):
         """Return the name of the indicator."""
         return "RSI"
 
-    def analyze(
-        self, current_data: StockData, historical_data: HistoricalData
-    ) -> IndicatorResult:
+    def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         """Calculate RSI and check for buy signals."""
         period = self.get_param("period", 14)
         oversold_threshold = self.get_param("oversold_threshold", 30)
