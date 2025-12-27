@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  stockstalk:
+    build: .
+    container_name: stockstalk
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./logs:/app/logs
+    environment:
+      - BEEPER_WEBHOOK_URL=${BEEPER_WEBHOOK_URL:-}
+      - PHONE_NUMBERS=${PHONE_NUMBERS:-}
+    command: python -m stockstalk
+    
+  stockstalk-server:
+    build: .
+    container_name: stockstalk-server
+    restart: unless-stopped
+    ports:
+      - "5001:5000"
+    volumes:
+      - ./config.json:/app/config.json
+      - ./logs:/app/logs
+    environment:
+      - BEEPER_WEBHOOK_URL=${BEEPER_WEBHOOK_URL:-}
+      - PHONE_NUMBERS=${PHONE_NUMBERS:-}
+    command: python -m stockstalk --server --port 5000
