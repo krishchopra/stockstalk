@@ -1,0 +1,82 @@
+{
+  "watchlist": [
+    {
+      "symbol": "AAPL",
+      "enabled_indicators": [
+        "RSI",
+        "MA_Crossover",
+        "Volume_Spike",
+        "Price_Change",
+        "MACD"
+      ],
+      "custom_params": {
+        "RSI": {
+          "period": 14,
+          "oversold_threshold": 30,
+          "overbought_threshold": 70
+        },
+        "MA_Crossover": {
+          "short_period": 10,
+          "long_period": 50
+        },
+        "Volume_Spike": {
+          "lookback_period": 20,
+          "spike_threshold": 2.0
+        },
+        "Price_Change": {
+          "significant_drop_pct": -5.0,
+          "significant_gain_pct": 5.0
+        },
+        "MACD": {
+          "fast_period": 12,
+          "slow_period": 26,
+          "signal_period": 9
+        }
+      }
+    },
+    {
+      "symbol": "MSFT",
+      "enabled_indicators": [
+        "RSI",
+        "MA_Crossover",
+        "MACD"
+      ],
+      "custom_params": {}
+    },
+    {
+      "symbol": "GOOGL",
+      "enabled_indicators": [
+        "RSI",
+        "Volume_Spike",
+        "Price_Change"
+      ],
+      "custom_params": {}
+    },
+    {
+      "symbol": "TSLA",
+      "enabled_indicators": [
+        "RSI",
+        "Volume_Spike",
+        "Price_Change"
+      ],
+      "custom_params": {
+        "Volume_Spike": {
+          "spike_threshold": 3.0
+        },
+        "Price_Change": {
+          "significant_drop_pct": -8.0,
+          "significant_gain_pct": 8.0
+        }
+      }
+    }
+  ],
+  "notification_config": {
+    "phone_numbers": [
+      "+1234567890"
+    ],
+    "beeper_webhook_url": "https://your-beeper-webhook-url-here",
+    "min_priority": "medium"
+  },
+  "check_interval_minutes": 15,
+  "data_lookback_days": 30
+}
