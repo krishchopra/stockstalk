@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Main scheduler service
+  stock-sentinel:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-sentinel
+    restart: unless-stopped
+    environment:
+      - STOCK_SENTINEL_DEBUG=false
+      - STOCK_SENTINEL_LOG_LEVEL=INFO
+      - STOCK_SENTINEL_DATABASE_URL=sqlite+aiosqlite:///./data/stock_sentinel.db
+      - STOCK_SENTINEL_CHECK_INTERVAL_MINUTES=15
+      - STOCK_SENTINEL_MARKET_HOURS_ONLY=true
+      - STOCK_SENTINEL_BEEPER_API_KEY=${BEEPER_API_KEY}
+      - STOCK_SENTINEL_BEEPER_SENDER_ID=${BEEPER_SENDER_ID}
+    volumes:
+      - stock_sentinel_data:/app/data
+    networks:
+      - stock_sentinel_network
+    depends_on:
+      - webhook-server
+
+  # Webhook server for incoming messages
+  webhook-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stock-sentinel-webhook
+    restart: unless-stopped
+    command: ["python", "-m", "stock_sentinel.server.webhook"]
+    ports:
+      - "8080:8080"
+    environment:
+      - STOCK_SENTINEL_DEBUG=false
+      - STOCK_SENTINEL_LOG_LEVEL=INFO
+      - STOCK_SENTINEL_DATABASE_URL=sqlite+aiosqlite:///./data/stock_sentinel.db
+      - STOCK_SENTINEL_WEBHOOK_HOST=0.0.0.0
+      - STOCK_SENTINEL_WEBHOOK_PORT=8080
+      - STOCK_SENTINEL_BEEPER_API_KEY=${BEEPER_API_KEY}
+      - STOCK_SENTINEL_BEEPER_SENDER_ID=${BEEPER_SENDER_ID}
+    volumes:
+      - stock_sentinel_data:/app/data
+    networks:
+      - stock_sentinel_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8080/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  stock_sentinel_data:
+    driver: local
+
+networks:
+  stock_sentinel_network:
+    driver: bridge

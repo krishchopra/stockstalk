@@ -1,0 +1,104 @@
+[project]
+name = "stock-sentinel"
+version = "1.0.0"
+description = "A highly extensible stock monitoring system with real-time indicators and SMS notifications"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Stock Sentinel Team" }]
+keywords = ["stocks", "trading", "indicators", "notifications", "finance"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+
+dependencies = [
+    "yfinance>=0.2.51",
+    "pandas>=2.2.3",
+    "numpy>=2.2.3",
+    "pydantic>=2.11.5",
+    "pydantic-settings>=2.9.1",
+    "httpx>=0.28.1",
+    "apscheduler>=3.11.0",
+    "fastapi>=0.115.12",
+    "uvicorn>=0.34.3",
+    "rich>=14.0.0",
+    "typer>=0.15.4",
+    "python-dotenv>=1.1.0",
+    "sqlalchemy>=2.0.41",
+    "aiosqlite>=0.21.0",
+    "ta>=0.11.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.0.0",
+    "pytest-cov>=6.2.1",
+    "black>=25.1.0",
+    "ruff>=0.11.11",
+    "mypy>=1.16.0",
+    "types-requests>=2.32.0.20250602",
+    "pandas-stubs>=2.2.3.250527",
+    "respx>=0.22.0",
+]
+
+[project.scripts]
+stock-sentinel = "stock_sentinel.cli.terminal:app"
+stock-sentinel-server = "stock_sentinel.server.webhook:run_server"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stock_sentinel"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.eggs
+  | \.git
+  | \.hatch
+  | \.mypy_cache
+  | \.nox
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "B", "C4", "UP", "SIM"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-v --cov=src/stock_sentinel --cov-report=term-missing"
