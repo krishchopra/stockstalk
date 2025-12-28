@@ -1,0 +1,88 @@
+{
+  "watchlist": [
+    {
+      "symbol": "AAPL",
+      "enabled_indicators": [
+        "RSI",
+        "MACD",
+        "Fundamental_Score"
+      ],
+      "custom_params": {
+        "RSI": {
+          "period": 14,
+          "oversold_threshold": 30,
+          "overbought_threshold": 70
+        },
+        "Fundamental_Score": {
+          "min_score": 5
+        }
+      }
+    },
+    {
+      "symbol": "MSFT",
+      "enabled_indicators": [
+        "RSI",
+        "MA_Crossover",
+        "PEG_Ratio",
+        "ROIC",
+        "Free_Cash_Flow"
+      ],
+      "custom_params": {
+        "PEG_Ratio": {
+          "threshold": 1.5
+        },
+        "ROIC": {
+          "threshold": 0.15
+        }
+      }
+    },
+    {
+      "symbol": "GOOGL",
+      "enabled_indicators": [
+        "RSI",
+        "Volume_Spike",
+        "Debt_To_Equity",
+        "Operating_Margins",
+        "Revenue_Growth"
+      ],
+      "custom_params": {
+        "Debt_To_Equity": {
+          "threshold": 0.6
+        },
+        "Operating_Margins": {
+          "min_margin": 0.15
+        },
+        "Revenue_Growth": {
+          "threshold": 0.12
+        }
+      }
+    },
+    {
+      "symbol": "NVDA",
+      "enabled_indicators": [
+        "RSI",
+        "MACD",
+        "Fundamental_Score",
+        "Earnings_Growth"
+      ],
+      "custom_params": {
+        "Fundamental_Score": {
+          "min_score": 5
+        },
+        "Earnings_Growth": {
+          "threshold": 0.15
+        }
+      }
+    }
+  ],
+  "notification_config": {
+    "phone_numbers": [
+      "+1234567890"
+    ],
+    "min_priority": "medium",
+    "cooldown_minutes": 60,
+    "max_alerts_per_hour": 20
+  },
+  "check_interval_minutes": 15,
+  "data_lookback_days": 30
+}

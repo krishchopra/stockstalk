@@ -1,0 +1,58 @@
+[project]
+name = "stockstalk"
+version = "0.2.0"
+description = "An async stock monitoring app with AWS SNS notifications"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "yfinance>=0.2.33",
+    "pandas>=2.1.4",
+    "numpy>=1.26.2",
+    "python-dotenv>=1.0.0",
+    # Async web framework
+    "fastapi>=0.109.0",
+    "uvicorn[standard]>=0.27.0",
+    "httpx>=0.26.0",
+    # Async database
+    "aiosqlite>=0.19.0",
+    "sqlalchemy[asyncio]>=2.0.25",
+    # AWS SDK (async)
+    "aioboto3>=12.3.0",
+    # Scheduler
+    "apscheduler>=3.10.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.3",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "black>=23.12.1",
+    "mypy>=1.7.1",
+    "types-aioboto3>=12.3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+include = '\.pyi?$'
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --cov=stockstalk --cov-report=term-missing"
