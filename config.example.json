@@ -4,10 +4,8 @@
       "symbol": "AAPL",
       "enabled_indicators": [
         "RSI",
-        "MA_Crossover",
-        "Volume_Spike",
-        "Price_Change",
-        "MACD"
+        "MACD",
+        "Fundamental_Score"
       ],
       "custom_params": {
         "RSI": {
@@ -15,22 +13,8 @@
           "oversold_threshold": 30,
           "overbought_threshold": 70
         },
-        "MA_Crossover": {
-          "short_period": 10,
-          "long_period": 50
-        },
-        "Volume_Spike": {
-          "lookback_period": 20,
-          "spike_threshold": 2.0
-        },
-        "Price_Change": {
-          "significant_drop_pct": -5.0,
-          "significant_gain_pct": 5.0
-        },
-        "MACD": {
-          "fast_period": 12,
-          "slow_period": 26,
-          "signal_period": 9
+        "Fundamental_Score": {
+          "min_score": 5
         }
       }
     },
@@ -39,33 +23,54 @@
       "enabled_indicators": [
         "RSI",
         "MA_Crossover",
-        "MACD"
+        "PEG_Ratio",
+        "ROIC",
+        "Free_Cash_Flow"
       ],
-      "custom_params": {}
+      "custom_params": {
+        "PEG_Ratio": {
+          "threshold": 1.5
+        },
+        "ROIC": {
+          "threshold": 0.15
+        }
+      }
     },
     {
       "symbol": "GOOGL",
       "enabled_indicators": [
         "RSI",
         "Volume_Spike",
-        "Price_Change"
-      ],
-      "custom_params": {}
-    },
-    {
-      "symbol": "TSLA",
-      "enabled_indicators": [
-        "RSI",
-        "Volume_Spike",
-        "Price_Change"
+        "Debt_To_Equity",
+        "Operating_Margins",
+        "Revenue_Growth"
       ],
       "custom_params": {
-        "Volume_Spike": {
-          "spike_threshold": 3.0
+        "Debt_To_Equity": {
+          "threshold": 0.6
         },
-        "Price_Change": {
-          "significant_drop_pct": -8.0,
-          "significant_gain_pct": 8.0
+        "Operating_Margins": {
+          "min_margin": 0.15
+        },
+        "Revenue_Growth": {
+          "threshold": 0.12
+        }
+      }
+    },
+    {
+      "symbol": "NVDA",
+      "enabled_indicators": [
+        "RSI",
+        "MACD",
+        "Fundamental_Score",
+        "Earnings_Growth"
+      ],
+      "custom_params": {
+        "Fundamental_Score": {
+          "min_score": 5
+        },
+        "Earnings_Growth": {
+          "threshold": 0.15
         }
       }
     }
@@ -74,8 +79,9 @@
     "phone_numbers": [
       "+1234567890"
     ],
-    "beeper_webhook_url": "https://your-beeper-webhook-url-here",
-    "min_priority": "medium"
+    "min_priority": "medium",
+    "cooldown_minutes": 60,
+    "max_alerts_per_hour": 20
   },
   "check_interval_minutes": 15,
   "data_lookback_days": 30

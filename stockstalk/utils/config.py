@@ -73,8 +73,7 @@ class ConfigManager:
         """
         from stockstalk.models import NotificationConfig, WatchlistItem
 
-        # Load from environment variables if available
-        beeper_webhook = os.getenv("BEEPER_WEBHOOK_URL")
+        # Load phone numbers from environment if available
         phone_numbers = os.getenv("PHONE_NUMBERS", "").split(",")
         phone_numbers = [p.strip() for p in phone_numbers if p.strip()]
 
@@ -100,7 +99,6 @@ class ConfigManager:
                 ),
             ],
             notification_config=NotificationConfig(
-                beeper_webhook_url=beeper_webhook,
                 phone_numbers=phone_numbers,
             ),
             check_interval_minutes=15,

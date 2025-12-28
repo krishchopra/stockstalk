@@ -52,13 +52,25 @@ class IndicatorResult(BaseModel):
 
 
 class NotificationConfig(BaseModel):
-    """Configuration for notifications."""
+    """Configuration for notifications via AWS SNS."""
 
-    phone_numbers: list[str] = Field(default_factory=list, description="Phone numbers to notify")
-    beeper_webhook_url: str | None = Field(None, description="Beeper webhook URL")
+    phone_numbers: list[str] = Field(
+        default_factory=list,
+        description="Phone numbers to notify (E.164 format, e.g., +14155551234)",
+    )
     min_priority: AlertPriority = Field(
         default=AlertPriority.MEDIUM,
         description="Minimum priority to trigger notification",
+    )
+    cooldown_minutes: int = Field(
+        default=60,
+        ge=1,
+        description="Minimum minutes between alerts for same symbol/indicator",
+    )
+    max_alerts_per_hour: int = Field(
+        default=20,
+        ge=1,
+        description="Maximum alerts to send per hour",
     )
 
 

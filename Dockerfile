@@ -1,31 +1,54 @@
-FROM python:3.11-slim
+# StockStalk Dockerfile
+# Multi-stage build for smaller final image
 
-# Set working directory
-WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# Build stage
+FROM python:3.11-slim AS builder
 
 # Install UV package manager
-RUN pip install uv
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
+
+WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml .
 COPY stockstalk/ ./stockstalk/
 
-# Install dependencies using UV
-RUN uv pip install --system -e .
+# Create virtual environment and install dependencies
+RUN uv venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+RUN uv pip install --no-cache .
 
-# Create directory for logs and config
-RUN mkdir -p /app/logs
+# Production stage
+FROM python:3.11-slim AS production
+
+# Create non-root user for security
+RUN groupadd -r stockstalk && useradd -r -g stockstalk stockstalk
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy source code
+COPY --from=builder /app/stockstalk /app/stockstalk
 
 # Set environment variables
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app"
 ENV PYTHONUNBUFFERED=1
 
-# Expose port for API server
-EXPOSE 5000
+# Create directories for data and logs
+RUN mkdir -p /app/data /app/logs && chown -R stockstalk:stockstalk /app
 
-# Default command (can be overridden)
+# Switch to non-root user
+USER stockstalk
+
+# Expose port for FastAPI server
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()" || exit 1
+
+# Default command - run the scheduler
 CMD ["python", "-m", "stockstalk"]

@@ -1,30 +1,50 @@
 version: '3.8'
 
 services:
+  # Combined scheduler and API server
   stockstalk:
     build: .
     container_name: stockstalk
     restart: unless-stopped
     ports:
-      - "5000:5000"
+      - "8000:8000"
     volumes:
-      - ./config.json:/app/config.json
+      - ./config.json:/app/config.json:ro
+      - stockstalk_data:/app/data
       - ./logs:/app/logs
     environment:
-      - BEEPER_WEBHOOK_URL=${BEEPER_WEBHOOK_URL:-}
-      - PHONE_NUMBERS=${PHONE_NUMBERS:-}
-    command: python -m stockstalk
-    
-  stockstalk-server:
+      # AWS credentials (or use IAM role on EC2)
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+    command: python -m stockstalk --server
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Scheduler-only service (if you want to run them separately)
+  stockstalk-scheduler:
     build: .
-    container_name: stockstalk-server
+    container_name: stockstalk-scheduler
     restart: unless-stopped
-    ports:
-      - "5001:5000"
+    profiles:
+      - scheduler
     volumes:
-      - ./config.json:/app/config.json
+      - ./config.json:/app/config.json:ro
+      - stockstalk_data:/app/data
       - ./logs:/app/logs
     environment:
-      - BEEPER_WEBHOOK_URL=${BEEPER_WEBHOOK_URL:-}
-      - PHONE_NUMBERS=${PHONE_NUMBERS:-}
-    command: python -m stockstalk --server --port 5000
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+    command: python -m stockstalk
+    depends_on:
+      stockstalk:
+        condition: service_healthy
+
+volumes:
+  stockstalk_data:
+    driver: local
