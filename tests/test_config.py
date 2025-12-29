@@ -1,58 +1,75 @@
-"""Tests for configuration management."""
+"""Tests for settings module."""
 
-import json
-from pathlib import Path
-
-import pytest
-
-from stockstalk.models import AppConfig, WatchlistItem
-from stockstalk.utils.config import ConfigManager
+import os
+from unittest import mock
 
 
-def test_config_manager_default_config(tmp_path: Path) -> None:
-    """Test creating default configuration."""
-    config_path = tmp_path / "config.json"
-    manager = ConfigManager(config_path)
+def test_settings_defaults() -> None:
+    """Test that settings have sensible defaults."""
+    # Import fresh settings
+    from stockstalk.settings import Settings
 
-    config = manager.load_config()
+    settings = Settings()
 
-    assert isinstance(config, AppConfig)
-    assert config_path.exists()
-
-
-def test_config_manager_save_and_load(tmp_path: Path) -> None:
-    """Test saving and loading configuration."""
-    config_path = tmp_path / "config.json"
-    manager = ConfigManager(config_path)
-
-    # Create config
-    config = AppConfig(
-        watchlist=[
-            WatchlistItem(symbol="AAPL", enabled_indicators=["RSI"]),
-        ],
-        check_interval_minutes=20,
-    )
-
-    # Save
-    manager.save_config(config)
-
-    # Load
-    loaded_config = manager.load_config()
-
-    assert len(loaded_config.watchlist) == 1
-    assert loaded_config.watchlist[0].symbol == "AAPL"
-    assert loaded_config.check_interval_minutes == 20
+    assert settings.COOLDOWN_MINUTES == 60
+    assert settings.MAX_ALERTS_PER_HOUR == 10
+    assert settings.CHECK_INTERVAL_MINUTES == 60
+    assert settings.DATA_LOOKBACK_DAYS == 30
+    assert settings.HOST == "0.0.0.0"
+    assert settings.PORT == 8000
 
 
-def test_config_manager_validation(tmp_path: Path) -> None:
-    """Test that invalid config raises validation error."""
-    config_path = tmp_path / "config.json"
+def test_settings_from_environment() -> None:
+    """Test that settings are read from environment variables."""
+    env_vars = {
+        "COOLDOWN_MINUTES": "30",
+        "MAX_ALERTS_PER_HOUR": "5",
+        "CHECK_INTERVAL_MINUTES": "15",
+        "DATA_LOOKBACK_DAYS": "60",
+        "MIN_PRIORITY": "high",
+        "HOST": "127.0.0.1",
+        "PORT": "9000",
+    }
 
-    # Write invalid config
-    with open(config_path, "w") as f:
-        json.dump({"check_interval_minutes": -5}, f)  # Invalid negative
+    with mock.patch.dict(os.environ, env_vars, clear=False):
+        # Need to reimport to pick up new env vars
+        from stockstalk.settings import AlertPriority, Settings
 
-    manager = ConfigManager(config_path)
+        settings = Settings()
 
-    with pytest.raises(Exception):  # Pydantic ValidationError
-        manager.load_config()
+        assert settings.COOLDOWN_MINUTES == 30
+        assert settings.MAX_ALERTS_PER_HOUR == 5
+        assert settings.CHECK_INTERVAL_MINUTES == 15
+        assert settings.DATA_LOOKBACK_DAYS == 60
+        assert settings.MIN_PRIORITY == AlertPriority.HIGH
+        assert settings.HOST == "127.0.0.1"
+        assert settings.PORT == 9000
+
+
+def test_twilio_configured_check() -> None:
+    """Test Twilio configuration check."""
+    from stockstalk.settings import Settings
+
+    # Without credentials
+    settings = Settings()
+    settings.TWILIO_ACCOUNT_SID = ""
+    settings.TWILIO_AUTH_TOKEN = ""
+    settings.TWILIO_PHONE_NUMBER = ""
+    assert not settings.is_twilio_configured()
+
+    # With credentials
+    settings.TWILIO_ACCOUNT_SID = "test_sid"
+    settings.TWILIO_AUTH_TOKEN = "test_token"
+    settings.TWILIO_PHONE_NUMBER = "+1234567890"
+    assert settings.is_twilio_configured()
+
+
+def test_default_indicators() -> None:
+    """Test default indicators list."""
+    from stockstalk.settings import Settings
+
+    settings = Settings()
+
+    assert "RSI" in settings.DEFAULT_INDICATORS
+    assert "MACD" in settings.DEFAULT_INDICATORS
+    assert len(settings.DEFAULT_INDICATORS) >= 3
