@@ -122,7 +122,9 @@ async def get_stock_analysis(symbol: str) -> StockAnalysisResponse:
         )
 
         # Fetch stock data
-        current_data, historical_data = await data_fetcher.get_stock_data(symbol.upper(), days=30)
+        current_data, historical_data = await data_fetcher.get_stock_data(
+            symbol.upper(), days=30
+        )
 
         # Run indicators (without sending notifications for API requests)
         results = []
@@ -228,7 +230,8 @@ async def add_to_watchlist(request: AddWatchlistRequest) -> MessageResponse:
         db = get_database()
         await db.add_to_watchlist(
             symbol=request.symbol.upper(),
-            enabled_indicators=request.enabled_indicators or IndicatorRegistry.list_indicators(),
+            enabled_indicators=request.enabled_indicators
+            or IndicatorRegistry.list_indicators(),
         )
         return MessageResponse(message=f"Added {request.symbol.upper()} to watchlist")
 
@@ -246,7 +249,9 @@ async def remove_from_watchlist(symbol: str) -> MessageResponse:
         if removed:
             return MessageResponse(message=f"Removed {symbol.upper()} from watchlist")
         else:
-            raise HTTPException(status_code=404, detail=f"{symbol.upper()} not found in watchlist")
+            raise HTTPException(
+                status_code=404, detail=f"{symbol.upper()} not found in watchlist"
+            )
 
     except HTTPException:
         raise
@@ -439,9 +444,13 @@ async def sms_webhook(
             user_watchlist = await db.get_user_watchlist(user_phone)
             symbols = [item.symbol.lower() for item in user_watchlist]
             if symbols:
-                return twiml_response(f"your watchlist ({len(symbols)}):\n" + ", ".join(symbols))
+                return twiml_response(
+                    f"your watchlist ({len(symbols)}):\n" + ", ".join(symbols)
+                )
             else:
-                return twiml_response("your watchlist is empty. text 'add <symbol>' to add stocks.")
+                return twiml_response(
+                    "your watchlist is empty. text 'add <symbol>' to add stocks."
+                )
 
         # STATUS command
         if command == "status":
@@ -487,41 +496,64 @@ async def sms_webhook(
 
         try:
             # Fetch stock data
-            stock_data, historical_data = await data_fetcher.get_stock_data(symbol, days=30)
+            stock_data, historical_data = await data_fetcher.get_stock_data(
+                symbol, days=30
+            )
 
             price = stock_data.current_price
             prev_close = stock_data.previous_close
-            change = ((price - prev_close) / prev_close) * 100 if prev_close else 0
+            change_day = ((price - prev_close) / prev_close) * 100 if prev_close else 0
+
+            # Calculate weekly and monthly changes from historical data
+            closes = historical_data.close_prices
+            change_week = 0.0
+            change_month = 0.0
+            if len(closes) >= 5:
+                week_ago_price = closes[-5]
+                change_week = ((price - week_ago_price) / week_ago_price) * 100
+            if len(closes) >= 21:
+                month_ago_price = closes[-21]
+                change_month = ((price - month_ago_price) / month_ago_price) * 100
+            elif len(closes) >= 1:
+                # Use oldest available if less than 21 days
+                month_ago_price = closes[0]
+                change_month = ((price - month_ago_price) / month_ago_price) * 100
 
             # Direction indicator
-            if change > 0:
-                direction = "up"
-            elif change < 0:
-                direction = "down"
+            if change_day > 0:
+                direction = "📈"
+            elif change_day < 0:
+                direction = "📉"
             else:
-                direction = "flat"
+                direction = "➡️"
 
             # Start building message with price info
             msg = f"{symbol.lower()}\n"
-            msg += f"${price:.2f} ({change:+.2f}%) {direction}\n"
+            msg += f"${price:.2f} ({change_day:+.1f}% today) {direction}\n"
+            msg += f"week: {change_week:+.1f}% | month: {change_month:+.1f}%\n"
             if stock_data.volume:
                 msg += f"vol: {stock_data.volume:,.0f}\n"
-            msg += "\n"
 
             # Run all available indicators
             all_indicators = IndicatorRegistry.list_indicators()
 
             triggered_signals = []
+            all_results = []
             metrics = []
+            fundamental_score = 0
+            fundamental_max = 7
 
             for indicator_name in all_indicators:
                 try:
                     indicator = IndicatorRegistry.get_indicator(indicator_name)
                     result = indicator.analyze(stock_data, historical_data)
+                    all_results.append(result)
 
                     if result.is_triggered:
                         priority_prefix = (
-                            "[!] " if result.priority.value in ("high", "critical") else ""
+                            "[!] "
+                            if result.priority.value in ("high", "critical")
+                            else ""
                         )
                         triggered_signals.append(
                             f"{priority_prefix}{indicator_name.lower().replace('_', ' ')}"
@@ -533,43 +565,47 @@ async def sms_webhook(
                     # Technical indicators
                     if "rsi" in meta and meta["rsi"]:
                         metrics.append(f"rsi: {meta['rsi']:.1f}")
-                    if "macd" in meta:
-                        metrics.append(f"macd: {meta['macd']:.2f}")
-                    if "signal_line" in meta:
-                        metrics.append(f"macd signal: {meta['signal_line']:.2f}")
                     if "volume_ratio" in meta and meta["volume_ratio"]:
                         metrics.append(f"vol ratio: {meta['volume_ratio']:.1f}x")
-                    if "price_change_pct" in meta:
-                        metrics.append(f"price chg: {meta['price_change_pct']:.1f}%")
-                    if "sma_short" in meta and "sma_long" in meta:
-                        metrics.append(f"sma 20/50: {meta['sma_short']:.2f}/{meta['sma_long']:.2f}")
 
                     # Fundamental indicators
                     if "score" in meta and indicator_name == "Fundamental_Score":
-                        metrics.append(f"fundamental: {meta['score']:.0f}/100")
-                    if "peg_ratio" in meta and meta["peg_ratio"] and meta["peg_ratio"] > 0:
-                        metrics.append(f"peg: {meta['peg_ratio']:.2f}")
-                    if "pe_ratio" in meta and meta["pe_ratio"]:
-                        metrics.append(f"p/e: {meta['pe_ratio']:.1f}")
-                    if "roic" in meta and meta["roic"]:
-                        metrics.append(f"roic: {meta['roic']:.1f}%")
+                        fundamental_score = meta.get("score", 0)
+                        fundamental_max = meta.get("max_score", 7)
                     if "debt_to_equity" in meta and meta["debt_to_equity"]:
                         metrics.append(f"d/e: {meta['debt_to_equity']:.2f}")
-                    if "operating_margin" in meta and meta["operating_margin"]:
-                        metrics.append(f"op margin: {meta['operating_margin']:.1f}%")
-                    if "free_cash_flow" in meta and meta["free_cash_flow"]:
-                        fcf = meta["free_cash_flow"]
-                        if abs(fcf) >= 1e9:
-                            metrics.append(f"fcf: ${fcf/1e9:.1f}b")
-                        elif abs(fcf) >= 1e6:
-                            metrics.append(f"fcf: ${fcf/1e6:.1f}m")
                     if "revenue_growth" in meta and meta["revenue_growth"]:
                         metrics.append(f"rev growth: {meta['revenue_growth']:.1f}%")
                     if "earnings_growth" in meta and meta["earnings_growth"]:
-                        metrics.append(f"earnings growth: {meta['earnings_growth']:.1f}%")
+                        metrics.append(
+                            f"earnings growth: {meta['earnings_growth']:.1f}%"
+                        )
 
                 except Exception as e:
                     logger.debug(f"indicator {indicator_name} failed for {symbol}: {e}")
+
+            # Calculate composite score (0-100)
+            # Based on: signals triggered, signal strength, and fundamental score
+            total_indicators = len(all_results)
+            triggered_count = len(triggered_signals)
+            avg_signal_strength = (
+                sum(r.signal_strength for r in all_results) / total_indicators
+                if total_indicators > 0
+                else 0
+            )
+
+            # Composite score formula:
+            # - 40% from triggered signals ratio
+            # - 30% from average signal strength
+            # - 30% from fundamental score
+            signal_component = (triggered_count / max(total_indicators, 1)) * 40
+            strength_component = avg_signal_strength * 30
+            fundamental_component = (
+                (fundamental_score / fundamental_max) * 30 if fundamental_max > 0 else 0
+            )
+            composite_score = (
+                signal_component + strength_component + fundamental_component
+            )
 
             # Remove duplicates while preserving order
             seen = set()
@@ -579,18 +615,21 @@ async def sms_webhook(
                     seen.add(m)
                     unique_metrics.append(m)
 
-            # Add metrics
+            # Add composite score prominently
+            msg += f"\n⭐ score: {composite_score:.0f}/100\n"
+            msg += f"fundamental: {fundamental_score}/{fundamental_max}\n"
+
+            # Add key metrics
             if unique_metrics:
-                msg += "metrics:\n"
+                msg += "\nmetrics:\n"
                 msg += "\n".join(unique_metrics)
-                msg += "\n\n"
 
             # Add triggered signals
+            msg += f"\n\nsignals ({triggered_count}):\n"
             if triggered_signals:
-                msg += "signals:\n"
                 msg += "\n".join(triggered_signals)
             else:
-                msg += "no signals triggered"
+                msg += "none triggered"
 
             return twiml_response(msg)
 
