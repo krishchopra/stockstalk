@@ -998,6 +998,11 @@ class AIAssistant:
                             if hasattr(response, "output_text")
                             else "",
                         }
+                        logger.info(
+                            f"Continuation response: output_text={data.get('output_text', '')[:100]}, output length={len(data.get('output', []))}"
+                        )
+                        # Continue the loop to process the continuation response
+                        continue
                     except Exception as e:
                         logger.error(
                             f"OpenAI API continuation error: {e}", exc_info=True
@@ -1092,7 +1097,10 @@ class AIAssistant:
         for result in tool_results:
             try:
                 data = json.loads(result.get("output", "{}"))
-                if "error" in data:
+                if "message" in data:
+                    # Use the formatted message from tools like web_search
+                    lines.append(data["message"])
+                elif "error" in data:
                     lines.append(f"error: {data['error']}")
                 elif "symbol" in data:
                     lines.append(f"{data['symbol']}: ${data.get('price', 'N/A')}")
@@ -1101,8 +1109,8 @@ class AIAssistant:
                 elif "opportunities" in data:
                     for opp in data["opportunities"]:
                         lines.append(f"{opp['symbol']}: score {opp['score']}")
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Error formatting tool result: {e}")
 
         return "\n".join(lines) if lines else "here's what i found."
 
