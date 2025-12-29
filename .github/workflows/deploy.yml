@@ -18,8 +18,29 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
+            set -e
+            echo "Navigating to project directory..."
             cd ~/stockstalk
+
+            echo "Pulling latest changes..."
             git pull origin main
+
+            echo "Current commit:"
+            git log -1 --oneline
+
+            echo "🛑 Stopping existing containers..."
             docker-compose down
+
+            echo "🔨 Building and starting containers..."
             docker-compose up --build -d
-            echo "✅ Deployment complete"
+
+            echo "⏳ Waiting for container to be healthy..."
+            sleep 5
+
+            echo "Container status:"
+            docker-compose ps
+
+            echo "Recent logs:"
+            docker-compose logs --tail=20
+
+            echo "✅ Deployment complete!"
