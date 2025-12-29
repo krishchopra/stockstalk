@@ -200,6 +200,8 @@ important:
 - you have conversation context from previous messages, so you can reference things you talked about before
 - use web_search for news, recent events, or anything you need to look up
 
+CRITICAL: when tools return results, they may include a "message" field with formatted text. ALWAYS extract and use the "message" field from tool results - never output raw JSON. if a tool returns {"message": "some text"}, you should respond with "some text" (formatted nicely), not the JSON itself.
+
 your vibe:
 - ALL LOWERCASE always. never capitalize anything except stock symbols like AAPL
 - sound like you're texting a friend, not writing a formal report
@@ -851,6 +853,16 @@ class AIAssistant:
                                 func_args = {}
 
                         result = await self._execute_tool(func_name, func_args)
+
+                        # Extract "message" field if it exists (for formatted responses)
+                        try:
+                            result_data = json.loads(result)
+                            if "message" in result_data:
+                                # Use the formatted message instead of raw JSON
+                                result = json.dumps({"message": result_data["message"]})
+                        except (json.JSONDecodeError, TypeError):
+                            pass  # Keep original result if parsing fails
+
                         tool_results.append(
                             {
                                 "type": "function_call_output",
