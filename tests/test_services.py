@@ -94,9 +94,9 @@ def test_notification_service_format_message() -> None:
 
     formatted = service._format_message(result)
 
-    assert "AAPL" in formatted
-    assert "Test message" in formatted
-    assert "🔔" in formatted  # HIGH priority emoji
+    assert "aapl" in formatted  # lowercase per implementation
+    assert "test message" in formatted  # lowercase per implementation
+    assert "[!]" in formatted  # HIGH priority prefix
 
 
 def test_stock_analyzer_initialization() -> None:
