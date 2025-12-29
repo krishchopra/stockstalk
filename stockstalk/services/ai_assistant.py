@@ -801,28 +801,41 @@ class AIAssistant:
                     return response_text
 
                 if isinstance(output, list):
-                    logger.info(
-                        f"Processing output list with {len(output)} items: {output}"
-                    )
-                    tool_calls = [
-                        item
-                        for item in output
-                        if isinstance(item, dict)
-                        and item.get("type") == "function_call"
-                    ]
-                    text_outputs = [
-                        item
-                        for item in output
-                        if isinstance(item, dict) and item.get("type") == "message"
-                    ]
+                    logger.info(f"Processing output list with {len(output)} items")
+                    tool_calls = []
+                    text_outputs = []
+
+                    for item in output:
+                        # Handle both dict and ResponseFunctionToolCall/ResponseOutputMessage objects
+                        item_type = None
+                        if isinstance(item, dict):
+                            item_type = item.get("type")
+                        elif hasattr(item, "type"):
+                            item_type = item.type
+                        elif hasattr(item, "__class__"):
+                            # Check class name for OpenAI response objects
+                            class_name = item.__class__.__name__
+                            if "FunctionToolCall" in class_name:
+                                item_type = "function_call"
+                            elif (
+                                "OutputMessage" in class_name or "Message" in class_name
+                            ):
+                                item_type = "message"
+
+                        if item_type == "function_call":
+                            tool_calls.append(item)
+                        elif item_type == "message":
+                            text_outputs.append(item)
 
                     logger.info(
                         f"Found {len(tool_calls)} tool calls, {len(text_outputs)} text outputs"
                     )
                     if tool_calls:
-                        logger.info(f"Tool calls: {tool_calls}")
+                        logger.info(
+                            f"Tool calls: {[getattr(tc, 'name', tc.get('name', 'unknown') if isinstance(tc, dict) else 'unknown') for tc in tool_calls]}"
+                        )
                     if text_outputs:
-                        logger.info(f"Text outputs: {text_outputs}")
+                        logger.info(f"Text outputs found: {len(text_outputs)}")
 
                     if not tool_calls:
                         # No more tool calls, return the text
@@ -892,8 +905,14 @@ class AIAssistant:
                     # Execute all tool calls
                     tool_results = []
                     for tool_call in tool_calls:
-                        func_name = tool_call.get("name", "")
-                        func_args = tool_call.get("arguments", {})
+                        # Extract function name and arguments from object or dict
+                        if isinstance(tool_call, dict):
+                            func_name = tool_call.get("name", "")
+                            func_args = tool_call.get("arguments", {})
+                        else:
+                            # It's a ResponseFunctionToolCall object
+                            func_name = getattr(tool_call, "name", "")
+                            func_args = getattr(tool_call, "arguments", "")
 
                         # Parse arguments if they're a string
                         if isinstance(func_args, str):
@@ -901,6 +920,10 @@ class AIAssistant:
                                 func_args = json.loads(func_args)
                             except json.JSONDecodeError:
                                 func_args = {}
+
+                        logger.info(
+                            f"Executing tool: {func_name} with args: {func_args}"
+                        )
 
                         result = await self._execute_tool(func_name, func_args)
 
@@ -913,10 +936,16 @@ class AIAssistant:
                         except (json.JSONDecodeError, TypeError):
                             pass  # Keep original result if parsing fails
 
+                        # Extract call_id from object or dict
+                        if isinstance(tool_call, dict):
+                            call_id = tool_call.get("call_id", "")
+                        else:
+                            call_id = getattr(tool_call, "call_id", "")
+
                         tool_results.append(
                             {
                                 "type": "function_call_output",
-                                "call_id": tool_call.get("call_id", ""),
+                                "call_id": call_id,
                                 "output": result,
                             }
                         )
