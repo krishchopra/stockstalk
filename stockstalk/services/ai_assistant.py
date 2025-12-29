@@ -611,6 +611,7 @@ class AIAssistant:
                     return await self._fallback_response(user_message, user_watchlist)
 
                 data = response.json()
+                logger.debug(f"OpenAI response: {data}")
 
             # Process the response - handle tool calls in a loop
             max_iterations = 5
@@ -621,6 +622,7 @@ class AIAssistant:
 
                 # Check if there are tool calls to process
                 output = data.get("output", [])
+                logger.debug(f"Processing output type={type(output)}: {output}")
 
                 # Handle different response formats
                 if isinstance(output, str):
@@ -656,9 +658,28 @@ class AIAssistant:
                         # No more tool calls, return the text
                         if text_outputs:
                             last_output = text_outputs[-1]
-                            # Handle both dict and string formats
+                            # Handle different content formats from OpenAI API
+                            content = ""
                             if isinstance(last_output, dict):
-                                content = last_output.get("content", "")
+                                raw_content = last_output.get("content", "")
+                                # Content can be a string or a list of content blocks
+                                if isinstance(raw_content, str):
+                                    content = raw_content
+                                elif isinstance(raw_content, list):
+                                    # Extract text from content blocks
+                                    text_parts = []
+                                    for block in raw_content:
+                                        if isinstance(block, str):
+                                            text_parts.append(block)
+                                        elif isinstance(block, dict):
+                                            # Handle {"type": "text", "text": "..."} format
+                                            if block.get("type") == "text":
+                                                text_parts.append(block.get("text", ""))
+                                            elif "text" in block:
+                                                text_parts.append(block.get("text", ""))
+                                    content = " ".join(text_parts)
+                                else:
+                                    content = str(raw_content)
                             elif isinstance(last_output, str):
                                 content = last_output
                             else:
@@ -853,6 +874,7 @@ class AIAssistant:
         # Try to extract stock symbols
         potential_symbols = re.findall(r"\b[A-Z]{1,5}\b", user_message.upper())
         common_words = {
+            # Common English words
             "I",
             "A",
             "THE",
@@ -866,8 +888,94 @@ class AIAssistant:
             "ME",
             "AM",
             "DO",
+            "IN",
+            "ON",
+            "AT",
+            "BY",
+            "UP",
+            "SO",
+            "IF",
+            "AS",
+            "OF",
+            "BE",
+            "WE",
+            "AN",
+            "NO",
+            "YES",
+            "NOT",
+            "BUT",
+            "HOW",
+            "WHY",
+            "WHAT",
+            "WHEN",
+            "WHO",
+            "CAN",
+            "ALL",
+            "GET",
+            "GOT",
+            "HAS",
+            "HAD",
+            "WAS",
+            "ARE",
+            "BEEN",
+            "HAVE",
+            "WILL",
+            "FROM",
+            "WITH",
+            "THAT",
+            "THIS",
+            "THEN",
+            "THAN",
+            "SOME",
+            "JUST",
+            "ALSO",
+            "ONLY",
+            "YOUR",
+            "THEM",
+            # Greetings and casual words - these are NOT stock symbols!
+            "HEY",
+            "HI",
+            "HELLO",
+            "YO",
+            "SUP",
+            "BYE",
+            "OK",
+            "OKAY",
+            "YEAH",
+            "YEP",
+            "NAH",
+            "WHATS",
+            "THANKS",
+            "THANK",
+            "PLEASE",
+            "PLS",
+            "LOL",
+            "OMG",
+            "WOW",
+            "COOL",
+            "NICE",
+            "GOOD",
+            "BAD",
+            "HELP",
+            "GREAT",
+            "SURE",
+            "FINE",
         }
         symbols = [s for s in potential_symbols if s not in common_words]
+
+        # If the message looks like a greeting, just respond friendly
+        greetings = {
+            "hey",
+            "hi",
+            "hello",
+            "yo",
+            "sup",
+            "whats up",
+            "what's up",
+            "howdy",
+        }
+        if any(g in message_lower for g in greetings) and not symbols:
+            return "hey! what can i help you with? ask me about stocks or your watchlist 📈"
 
         # Check for specific commands
         if any(word in message_lower for word in ["list", "watchlist", "watching"]):
