@@ -29,7 +29,7 @@ class Settings:
 
         # OpenAI settings (for AI-powered assistant)
         self.OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-        self.OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+        self.OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 
         # Notification settings
         self.MIN_PRIORITY: AlertPriority = AlertPriority(

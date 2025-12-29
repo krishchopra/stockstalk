@@ -1,5 +1,6 @@
-"""AI-powered investment assistant using OpenAI gpt-5-mini with function calling."""
+"""AI-powered investment assistant using OpenAI gpt-5-nano with function calling."""
 
+import asyncio
 import json
 import logging
 import re
@@ -8,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 import httpx
+from openai import OpenAI
 
 from stockstalk.models import WatchlistItem
 from stockstalk.services.analyzer import IndicatorRegistry
@@ -232,23 +234,25 @@ remember: you're helpful, opinionated, and knowledgeable. text like a real perso
 class AIAssistant:
     """AI-powered assistant with function calling for investment insights."""
 
-    OPENAI_API_URL = "https://api.openai.com/v1/responses"
-
     def __init__(self) -> None:
         """Initialize the AI assistant."""
         self.api_key = settings.OPENAI_API_KEY
         self.model = settings.OPENAI_MODEL
         self.data_fetcher = StockDataFetcher()
 
+        # Initialize OpenAI client
+        if self.api_key:
+            self.client = OpenAI(api_key=self.api_key)
+        else:
+            self.client = None
+            logger.warning(
+                "OpenAI API key not configured. Set OPENAI_API_KEY environment variable."
+            )
+
         # These get set per-request for tool execution
         self._current_user_phone: str | None = None
         self._current_user_watchlist: list[WatchlistItem] = []
         self._db = None
-
-        if not self.api_key:
-            logger.warning(
-                "OpenAI API key not configured. Set OPENAI_API_KEY environment variable."
-            )
 
     def is_configured(self) -> bool:
         """Check if OpenAI is properly configured."""
@@ -700,38 +704,31 @@ class AIAssistant:
 
             input_text = f"{SYSTEM_PROMPT}{watchlist_context}{history_text}\n\nUser message: {user_message}"
 
-            # Make the API call with tools
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    logger.debug(f"Calling OpenAI API with model {self.model}")
-                    response = await client.post(
-                        self.OPENAI_API_URL,
-                        headers={
-                            "Authorization": f"Bearer {self.api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json={
-                            "model": self.model,
-                            "input": input_text,
-                            "tools": TOOLS,
-                        },
-                    )
-
-                    if response.status_code != 200:
-                        logger.error(
-                            f"OpenAI API error: {response.status_code} - {response.text}"
-                        )
-                        return await self._fallback_response(
-                            user_message, user_watchlist
-                        )
-
-                    data = response.json()
-                    logger.debug("OpenAI API response received")
-            except httpx.TimeoutException:
-                logger.error("OpenAI API request timed out after 30 seconds")
+            # Make the API call with tools using OpenAI client
+            if not self.client:
                 return await self._fallback_response(user_message, user_watchlist)
-            except httpx.RequestError as e:
-                logger.error(f"OpenAI API request error: {e}")
+
+            try:
+                logger.debug(f"Calling OpenAI API with model {self.model}")
+                # Run synchronous OpenAI call in thread pool
+                response = await asyncio.to_thread(
+                    self.client.responses.create,
+                    model=self.model,
+                    input=input_text,
+                    tools=TOOLS,
+                )
+                logger.debug("OpenAI API response received")
+
+                # Extract response data
+                data = {
+                    "id": response.id if hasattr(response, "id") else None,
+                    "output": response.output if hasattr(response, "output") else [],
+                    "output_text": response.output_text
+                    if hasattr(response, "output_text")
+                    else "",
+                }
+            except Exception as e:
+                logger.error(f"OpenAI API request error: {e}", exc_info=True)
                 return await self._fallback_response(user_message, user_watchlist)
 
             # Process the response - handle tool calls in a loop
@@ -740,6 +737,25 @@ class AIAssistant:
 
             while iteration < max_iterations:
                 iteration += 1
+
+                # Check for output_text first (primary response format from OpenAI)
+                output_text = data.get("output_text", "")
+                if output_text and not data.get(
+                    "output"
+                ):  # If we have output_text and no tool calls
+                    response_text = str(output_text).lower()
+                    # Save conversation
+                    if db:
+                        try:
+                            await db.add_conversation_message(
+                                user_phone, "user", user_message
+                            )
+                            await db.add_conversation_message(
+                                user_phone, "assistant", response_text
+                            )
+                        except Exception as e:
+                            logger.debug(f"Could not save conversation: {e}")
+                    return response_text
 
                 # Check if there are tool calls to process
                 output = data.get("output", [])
@@ -873,44 +889,35 @@ class AIAssistant:
 
                     # Continue the conversation with tool results
                     try:
-                        async with httpx.AsyncClient(timeout=30.0) as client:
-                            response = await client.post(
-                                self.OPENAI_API_URL,
-                                headers={
-                                    "Authorization": f"Bearer {self.api_key}",
-                                    "Content-Type": "application/json",
-                                },
-                                json={
-                                    "model": self.model,
-                                    "input": tool_results,
-                                    "previous_response_id": data.get("id"),
-                                },
-                            )
+                        # Format tool results for OpenAI API
+                        # OpenAI expects tool results in a specific format
+                        tool_input = (
+                            json.dumps(tool_results)
+                            if isinstance(tool_results, list)
+                            else str(tool_results)
+                        )
 
-                            if response.status_code != 200:
-                                logger.error(
-                                    f"OpenAI API error on continuation: {response.status_code}"
-                                )
-                                # Return partial results
-                                response_text = self._format_tool_results(tool_results)
-                                # Save conversation
-                                if db:
-                                    try:
-                                        await db.add_conversation_message(
-                                            user_phone, "user", user_message
-                                        )
-                                        await db.add_conversation_message(
-                                            user_phone, "assistant", response_text
-                                        )
-                                    except Exception as e:
-                                        logger.debug(
-                                            f"Could not save conversation: {e}"
-                                        )
-                                return response_text
+                        response = await asyncio.to_thread(
+                            self.client.responses.create,
+                            model=self.model,
+                            input=tool_input,
+                            previous_response_id=data.get("id"),
+                        )
 
-                            data = response.json()
-                    except (httpx.TimeoutException, httpx.RequestError) as e:
-                        logger.error(f"OpenAI API continuation error: {e}")
+                        # Extract response data
+                        data = {
+                            "id": response.id if hasattr(response, "id") else None,
+                            "output": response.output
+                            if hasattr(response, "output")
+                            else [],
+                            "output_text": response.output_text
+                            if hasattr(response, "output_text")
+                            else "",
+                        }
+                    except Exception as e:
+                        logger.error(
+                            f"OpenAI API continuation error: {e}", exc_info=True
+                        )
                         response_text = self._format_tool_results(tool_results)
                         if db:
                             try:

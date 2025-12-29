@@ -4,7 +4,7 @@ A powerful, AI-powered stock monitoring application that watches stocks and send
 
 ## Features
 
-- **🤖 AI-Powered Assistant**: Natural language understanding via GPT-5-mini - just text your questions!
+- **🤖 AI-Powered Assistant**: Natural language understanding via GPT-5-nano - just text your questions!
 - **📊 Daily Digests**: Automated morning summaries of your watchlist with AI insights
 - **💡 Opportunity Discovery**: Scans VTI holdings to find investment opportunities you might be missing
 - **Technical Indicators**: RSI, MACD, Moving Average Crossover, Volume Spike Detection, and Price Change alerts
@@ -20,7 +20,7 @@ A powerful, AI-powered stock monitoring application that watches stocks and send
 ## Tech Stack
 
 - **Python 3.11+**: Modern Python with type hints
-- **OpenAI gpt-5-mini**: AI-powered natural language understanding
+- **OpenAI gpt-5-nano**: AI-powered natural language understanding
 - **Pydantic**: Data validation and settings management
 - **yfinance**: Real-time stock data from Yahoo Finance
 - **FastAPI**: Async REST API server
@@ -129,7 +129,7 @@ TWILIO_PHONE_NUMBER=+14155551234
 
 # OpenAI (required for AI features)
 OPENAI_API_KEY=your_openai_api_key
-OPENAI_MODEL=gpt-5-mini  # default model
+OPENAI_MODEL=gpt-5-nano  # default model
 
 # Daily Digest Schedule
 DAILY_DIGEST_ENABLED=true
