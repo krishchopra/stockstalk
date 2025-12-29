@@ -5,7 +5,16 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, UniqueConstraint, select
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -59,7 +68,9 @@ class UserWatchlistRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Composite unique constraint: one symbol per user
-    __table_args__ = (UniqueConstraint("phone_number", "symbol", name="uq_user_symbol"),)
+    __table_args__ = (
+        UniqueConstraint("phone_number", "symbol", name="uq_user_symbol"),
+    )
 
 
 class PhoneNumberRecord(Base):
@@ -74,10 +85,24 @@ class PhoneNumberRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class ConversationMessage(Base):
+    """Stores conversation history for AI context."""
+
+    __tablename__ = "conversation_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    phone_number = Column(String(20), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # "user" or "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class Database:
     """Async database interface."""
 
-    def __init__(self, database_url: str = "sqlite+aiosqlite:///./stockstalk.db") -> None:
+    def __init__(
+        self, database_url: str = "sqlite+aiosqlite:///./stockstalk.db"
+    ) -> None:
         """
         Initialize database connection.
 
@@ -162,7 +187,9 @@ class Database:
         async with self.async_session() as session:
             record = WatchlistRecord(
                 symbol=symbol.upper(),
-                enabled_indicators=json.dumps(enabled_indicators) if enabled_indicators else None,
+                enabled_indicators=json.dumps(enabled_indicators)
+                if enabled_indicators
+                else None,
                 custom_params=json.dumps(custom_params) if custom_params else None,
                 enabled=True,
             )
@@ -217,7 +244,9 @@ class Database:
             if existing:
                 # Update existing record
                 existing.enabled_indicators = json.dumps(enabled_indicators)
-                existing.custom_params = json.dumps(custom_params) if custom_params else None
+                existing.custom_params = (
+                    json.dumps(custom_params) if custom_params else None
+                )
                 existing.enabled = True
                 await session.commit()
                 await session.refresh(existing)
@@ -291,7 +320,9 @@ class Database:
             await session.refresh(record)
             return record
 
-    async def get_phone_numbers(self, enabled_only: bool = True) -> list[PhoneNumberRecord]:
+    async def get_phone_numbers(
+        self, enabled_only: bool = True
+    ) -> list[PhoneNumberRecord]:
         """Get all phone numbers."""
         async with self.async_session() as session:
             query = select(PhoneNumberRecord)
@@ -304,7 +335,9 @@ class Database:
         """Remove a phone number."""
         async with self.async_session() as session:
             result = await session.execute(
-                select(PhoneNumberRecord).where(PhoneNumberRecord.phone_number == phone_number)
+                select(PhoneNumberRecord).where(
+                    PhoneNumberRecord.phone_number == phone_number
+                )
             )
             record = result.scalar_one_or_none()
             if record:
@@ -352,12 +385,89 @@ class Database:
             )
             return [row[0] for row in result.fetchall()]
 
+    # Conversation history methods
+    async def add_conversation_message(
+        self, phone_number: str, role: str, content: str
+    ) -> ConversationMessage:
+        """
+        Save a conversation message for context.
+
+        Args:
+            phone_number: User's phone number
+            role: "user" or "assistant"
+            content: Message content
+
+        Returns:
+            The saved message record
+        """
+        async with self.async_session() as session:
+            message = ConversationMessage(
+                phone_number=phone_number,
+                role=role,
+                content=content,
+            )
+            session.add(message)
+            await session.commit()
+            await session.refresh(message)
+            return message
+
+    async def get_conversation_history(
+        self, phone_number: str, limit: int = 10
+    ) -> list[dict[str, str]]:
+        """
+        Get recent conversation history for a user.
+
+        Args:
+            phone_number: User's phone number
+            limit: Maximum number of messages to return (default: 10)
+
+        Returns:
+            List of messages with 'role' and 'content' keys, ordered oldest to newest
+        """
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.phone_number == phone_number)
+                .order_by(ConversationMessage.created_at.desc())
+                .limit(limit)
+            )
+            messages = result.scalars().all()
+            # Reverse to get oldest first
+            return [
+                {"role": msg.role, "content": msg.content} for msg in reversed(messages)
+            ]
+
+    async def clear_conversation_history(self, phone_number: str) -> int:
+        """
+        Clear conversation history for a user.
+
+        Args:
+            phone_number: User's phone number
+
+        Returns:
+            Number of messages deleted
+        """
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(ConversationMessage).where(
+                    ConversationMessage.phone_number == phone_number
+                )
+            )
+            messages = result.scalars().all()
+            count = len(messages)
+            for msg in messages:
+                await session.delete(msg)
+            await session.commit()
+            return count
+
 
 # Global database instance
 _database: Database | None = None
 
 
-async def init_database(database_url: str = "sqlite+aiosqlite:///./stockstalk.db") -> Database:
+async def init_database(
+    database_url: str = "sqlite+aiosqlite:///./stockstalk.db",
+) -> Database:
     """Initialize and return the global database instance."""
     global _database
     _database = Database(database_url)

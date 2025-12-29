@@ -171,12 +171,16 @@ TOOLS = [
 
 SYSTEM_PROMPT = """you're a chill friend who knows a lot about stocks and investing. you text like a normal person - all lowercase, casual, helpful.
 
-you have tools to look up real stock data. use them to give accurate info.
+you have tools to look up real stock data. use them when needed, but you can also just chat!
 
 important:
 - users have a WATCHLIST (stocks they're tracking) - NOT an actual brokerage portfolio
 - when they say "my stocks" they mean their watchlist
 - we don't know their real holdings or cost basis
+- don't treat casual greetings or words like "hey", "hi", "what's up" as stock symbols
+- only use stock tools when the user is actually asking about stocks or investing
+- if someone's just chatting (like "hey what's up" or "how are you"), just respond naturally without tools
+- you have conversation context from previous messages, so you can reference things you talked about before
 
 your vibe:
 - ALL LOWERCASE always. never capitalize anything except stock symbols like AAPL
@@ -549,7 +553,17 @@ class AIAssistant:
         self._db = db
 
         try:
-            # Build initial request
+            # Get conversation history (last 10 messages)
+            conversation_history = []
+            if db:
+                try:
+                    conversation_history = await db.get_conversation_history(
+                        user_phone, limit=10
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not fetch conversation history: {e}")
+
+            # Build initial request with context
             watchlist_context = ""
             if user_watchlist:
                 symbols = [item.symbol for item in user_watchlist[:10]]
@@ -557,9 +571,23 @@ class AIAssistant:
                     f"\n\nUser's current watchlist: {', '.join(symbols)}"
                 )
 
-            input_text = (
-                f"{SYSTEM_PROMPT}{watchlist_context}\n\nUser message: {user_message}"
-            )
+            # Build conversation context
+            history_text = ""
+            if conversation_history:
+                history_lines = []
+                for msg in conversation_history[-10:]:  # Last 10 messages
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        history_lines.append(f"user: {content}")
+                    else:
+                        history_lines.append(f"you: {content}")
+                if history_lines:
+                    history_text = "\n\nrecent conversation:\n" + "\n".join(
+                        history_lines
+                    )
+
+            input_text = f"{SYSTEM_PROMPT}{watchlist_context}{history_text}\n\nUser message: {user_message}"
 
             # Make the API call with tools
             async with httpx.AsyncClient(timeout=60.0) as client:
@@ -597,24 +625,78 @@ class AIAssistant:
                 # Handle different response formats
                 if isinstance(output, str):
                     # Direct text response
-                    return output.lower()
+                    response_text = output.lower()
+                    # Save conversation
+                    if db:
+                        try:
+                            await db.add_conversation_message(
+                                user_phone, "user", user_message
+                            )
+                            await db.add_conversation_message(
+                                user_phone, "assistant", response_text
+                            )
+                        except Exception as e:
+                            logger.debug(f"Could not save conversation: {e}")
+                    return response_text
 
                 if isinstance(output, list):
                     tool_calls = [
-                        item for item in output if item.get("type") == "function_call"
+                        item
+                        for item in output
+                        if isinstance(item, dict)
+                        and item.get("type") == "function_call"
                     ]
                     text_outputs = [
-                        item for item in output if item.get("type") == "message"
+                        item
+                        for item in output
+                        if isinstance(item, dict) and item.get("type") == "message"
                     ]
 
                     if not tool_calls:
                         # No more tool calls, return the text
                         if text_outputs:
-                            return text_outputs[-1].get("content", "").lower()
+                            last_output = text_outputs[-1]
+                            # Handle both dict and string formats
+                            if isinstance(last_output, dict):
+                                content = last_output.get("content", "")
+                            elif isinstance(last_output, str):
+                                content = last_output
+                            else:
+                                content = str(last_output)
+                            response_text = (
+                                content.lower()
+                                if content
+                                else "i couldn't process that. try again."
+                            )
+                            # Save conversation
+                            if db:
+                                try:
+                                    await db.add_conversation_message(
+                                        user_phone, "user", user_message
+                                    )
+                                    await db.add_conversation_message(
+                                        user_phone, "assistant", response_text
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Could not save conversation: {e}")
+                            return response_text
                         # Try output_text as fallback
-                        return data.get(
-                            "output_text", "i couldn't process that. try again."
-                        ).lower()
+                        output_text = data.get("output_text", "")
+                        if output_text:
+                            response_text = str(output_text).lower()
+                            # Save conversation
+                            if db:
+                                try:
+                                    await db.add_conversation_message(
+                                        user_phone, "user", user_message
+                                    )
+                                    await db.add_conversation_message(
+                                        user_phone, "assistant", response_text
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Could not save conversation: {e}")
+                            return response_text
+                        return "i couldn't process that. try again."
 
                     # Execute all tool calls
                     tool_results = []
@@ -658,19 +740,84 @@ class AIAssistant:
                                 f"OpenAI API error on continuation: {response.status_code}"
                             )
                             # Return partial results
-                            return self._format_tool_results(tool_results)
+                            response_text = self._format_tool_results(tool_results)
+                            # Save conversation
+                            if db:
+                                try:
+                                    await db.add_conversation_message(
+                                        user_phone, "user", user_message
+                                    )
+                                    await db.add_conversation_message(
+                                        user_phone, "assistant", response_text
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Could not save conversation: {e}")
+                            return response_text
 
                         data = response.json()
                 else:
                     # Unknown format, try output_text
-                    return data.get("output_text", "i couldn't process that.").lower()
+                    output_text = data.get("output_text", "")
+                    if output_text:
+                        response_text = str(output_text).lower()
+                        # Save conversation at the end
+                        if db:
+                            try:
+                                await db.add_conversation_message(
+                                    user_phone, "user", user_message
+                                )
+                                await db.add_conversation_message(
+                                    user_phone, "assistant", response_text
+                                )
+                            except Exception as e:
+                                logger.debug(f"Could not save conversation: {e}")
+                        return response_text
+                    # Last resort: try to extract any text from output
+                    if isinstance(output, list) and output:
+                        # If output is a list of strings, join them
+                        if all(isinstance(item, str) for item in output):
+                            response_text = " ".join(output).lower()
+                            # Save conversation
+                            if db:
+                                try:
+                                    await db.add_conversation_message(
+                                        user_phone, "user", user_message
+                                    )
+                                    await db.add_conversation_message(
+                                        user_phone, "assistant", response_text
+                                    )
+                                except Exception as e:
+                                    logger.debug(f"Could not save conversation: {e}")
+                            return response_text
+                    return "i couldn't process that. try again."
 
-            # Max iterations reached
-            return "i'm still thinking about that. try a simpler question."
+            # Max iterations reached - save what we have
+            response_text = "i'm still thinking about that. try a simpler question."
+            if db:
+                try:
+                    await db.add_conversation_message(user_phone, "user", user_message)
+                    await db.add_conversation_message(
+                        user_phone, "assistant", response_text
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not save conversation: {e}")
+            return response_text
 
         except Exception as e:
             logger.error(f"Error in chat: {e}", exc_info=True)
-            return await self._fallback_response(user_message, user_watchlist)
+            fallback_response = await self._fallback_response(
+                user_message, user_watchlist
+            )
+            # Save conversation even on error
+            if db:
+                try:
+                    await db.add_conversation_message(user_phone, "user", user_message)
+                    await db.add_conversation_message(
+                        user_phone, "assistant", fallback_response
+                    )
+                except Exception:
+                    pass
+            return fallback_response
         finally:
             # Clear context
             self._current_user_phone = None
