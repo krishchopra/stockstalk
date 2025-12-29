@@ -16,6 +16,7 @@ DEFAULT_VTI_INDICATORS = [
     "MACD",
     "Volume_Spike",  # Volume spikes are critical for catching momentum
     "Price_Change",
+    "Fundamental_Score",  # Fundamental analysis for all stocks
 ]
 
 
@@ -1153,16 +1154,10 @@ class ETFHoldingsFetcher:
             if not symbol or len(symbol) > 10:
                 continue
 
-            # For top 50 holdings, add more comprehensive analysis
-            if len(watchlist) < 50:
-                stock_indicators = indicators + ["Fundamental_Score"]
-            else:
-                stock_indicators = indicators.copy()
-
             watchlist.append(
                 WatchlistItem(
                     symbol=symbol,
-                    enabled_indicators=list(set(stock_indicators)),  # Remove duplicates
+                    enabled_indicators=list(set(indicators)),  # Remove duplicates
                     custom_params={},
                 )
             )

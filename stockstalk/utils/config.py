@@ -97,21 +97,15 @@ class ConfigManager:
                 continue
             seen.add(symbol)
 
-            # Top 50 get fundamental analysis too
-            if len(watchlist) < 50:
-                indicators = DEFAULT_VTI_INDICATORS + ["Fundamental_Score"]
-            else:
-                indicators = DEFAULT_VTI_INDICATORS.copy()
-
             watchlist.append(
                 WatchlistItem(
                     symbol=symbol,
-                    enabled_indicators=list(set(indicators)),
+                    enabled_indicators=list(set(DEFAULT_VTI_INDICATORS)),
                     custom_params={},
                 )
             )
 
-        logger.info(f"Default watchlist: {len(watchlist)} stocks with Volume_Spike enabled")
+        logger.info(f"Default watchlist: {len(watchlist)} stocks with all indicators enabled")
 
         return AppConfig(
             watchlist=watchlist,

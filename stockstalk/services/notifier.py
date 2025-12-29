@@ -219,47 +219,27 @@ class NotificationService:
         if total_count is None:
             total_count = len(results)
 
-        # Group results by symbol while preserving priority order
-        by_symbol: dict[str, list[IndicatorResult]] = {}
-        symbol_order: list[str] = []
-        for r in results:
-            if r.symbol not in by_symbol:
-                by_symbol[r.symbol] = []
-                symbol_order.append(r.symbol)
-            by_symbol[r.symbol].append(r)
-
-        # Build message grouped by stock
+        # Build message - one line per alert, simple and clear
         lines = ["📊 StockStalk Top Signals:"]
 
-        for symbol in symbol_order[:10]:  # Limit to top 10 stocks
-            symbol_results = by_symbol[symbol]
-            triggered_count = len(symbol_results)
-
-            # Get total indicators for this symbol if available
-            if all_results_by_symbol and symbol in all_results_by_symbol:
-                total_indicators = len(all_results_by_symbol[symbol])
-            else:
-                total_indicators = triggered_count
-
-            # Get highest priority emoji
-            priorities = [r.priority for r in symbol_results]
-            if AlertPriority.CRITICAL in priorities:
+        for r in results[:10]:  # Top 10 alerts
+            # Get priority emoji
+            if r.priority == AlertPriority.CRITICAL:
                 emoji = "🚨"
-            elif AlertPriority.HIGH in priorities:
+            elif r.priority == AlertPriority.HIGH:
                 emoji = "🔔"
             else:
                 emoji = "📈"
 
-            # Get short messages for top 3 indicators for this stock
-            top_metrics = [self._get_short_message(r) for r in symbol_results[:3]]
-            metrics_str = ", ".join(top_metrics)
+            # Get the short metric message
+            metric = self._get_short_message(r)
 
-            # Format: 🔔 NVDA (4/5): ROIC 107%, EPS +67%, Rev +63%
-            lines.append(f"{emoji} {symbol} ({triggered_count}/{total_indicators}): {metrics_str}")
+            # Simple format: 🔔 NVDA: ROIC 107%
+            lines.append(f"{emoji} {r.symbol}: {metric}")
 
         # Add count summary
-        if total_count > len(results):
-            lines.append(f"\nTop {len(by_symbol)} stocks ({len(results)} signals)")
+        if total_count > 10:
+            lines.append(f"\nTop 10 of {total_count} signals")
 
         return "\n".join(lines)
 
