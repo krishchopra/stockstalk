@@ -719,6 +719,15 @@ class AIAssistant:
                 )
                 logger.debug("OpenAI API response received")
 
+                # Log response structure for debugging
+                logger.debug(f"Response attributes: {dir(response)}")
+                if hasattr(response, "output"):
+                    logger.debug(
+                        f"Response output type: {type(response.output)}, value: {response.output}"
+                    )
+                if hasattr(response, "output_text"):
+                    logger.debug(f"Response output_text: {response.output_text}")
+
                 # Extract response data
                 data = {
                     "id": response.id if hasattr(response, "id") else None,
@@ -727,6 +736,9 @@ class AIAssistant:
                     if hasattr(response, "output_text")
                     else "",
                 }
+                logger.debug(
+                    f"Extracted data: output type={type(data['output'])}, output_text={data['output_text'][:100] if data['output_text'] else 'empty'}"
+                )
             except Exception as e:
                 logger.error(f"OpenAI API request error: {e}", exc_info=True)
                 return await self._fallback_response(user_message, user_watchlist)
@@ -740,9 +752,13 @@ class AIAssistant:
 
                 # Check for output_text first (primary response format from OpenAI)
                 output_text = data.get("output_text", "")
-                if output_text and not data.get(
-                    "output"
-                ):  # If we have output_text and no tool calls
+                output = data.get("output", [])
+
+                # If we have output_text and no tool calls in output, use it directly
+                if output_text and (
+                    not output or (isinstance(output, list) and len(output) == 0)
+                ):
+                    logger.debug(f"Using output_text directly: {output_text[:100]}")
                     response_text = str(output_text).lower()
                     # Save conversation
                     if db:
@@ -758,7 +774,6 @@ class AIAssistant:
                     return response_text
 
                 # Check if there are tool calls to process
-                output = data.get("output", [])
 
                 # Handle different response formats
                 if isinstance(output, str):
@@ -778,6 +793,7 @@ class AIAssistant:
                     return response_text
 
                 if isinstance(output, list):
+                    logger.debug(f"Processing output list with {len(output)} items")
                     tool_calls = [
                         item
                         for item in output
@@ -789,6 +805,10 @@ class AIAssistant:
                         for item in output
                         if isinstance(item, dict) and item.get("type") == "message"
                     ]
+
+                    logger.debug(
+                        f"Found {len(tool_calls)} tool calls, {len(text_outputs)} text outputs"
+                    )
 
                     if not tool_calls:
                         # No more tool calls, return the text
