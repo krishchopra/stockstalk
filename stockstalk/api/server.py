@@ -4,7 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Form, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from stockstalk.models import WatchlistItem
@@ -355,3 +356,287 @@ async def test_sms(phone_number: str) -> MessageResponse:
     except Exception as e:
         logger.error(f"Error sending test SMS: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/debug/status")
+async def debug_status() -> dict:
+    """
+    Debug endpoint to check notification status, recent alerts, and config.
+    Useful for diagnosing why texts aren't being sent.
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        db = get_database()
+        config_manager = _config_manager or ConfigManager()
+        config = config_manager.load_config()
+
+        # Get recent alerts
+        recent_alerts = await db.get_alerts(limit=20)
+        alerts_last_hour = await db.get_alerts_count_since(minutes=60)
+
+        # Check config
+        notif_config = config.notification_config
+
+        return {
+            "notification_config": {
+                "phone_numbers": notif_config.phone_numbers,
+                "min_priority": notif_config.min_priority.value,
+                "cooldown_minutes": notif_config.cooldown_minutes,
+                "max_alerts_per_hour": notif_config.max_alerts_per_hour,
+            },
+            "rate_limits": {
+                "alerts_last_hour": alerts_last_hour,
+                "max_per_hour": notif_config.max_alerts_per_hour,
+                "rate_limited": alerts_last_hour >= notif_config.max_alerts_per_hour,
+            },
+            "recent_alerts": [
+                {
+                    "symbol": a.symbol,
+                    "indicator": a.indicator,
+                    "message": a.message,
+                    "priority": a.priority,
+                    "sent_to": a.sent_to,
+                    "created_at": a.created_at.isoformat() if a.created_at else None,
+                    "cooldown_expires": (
+                        (a.created_at + timedelta(minutes=notif_config.cooldown_minutes)).isoformat()
+                        if a.created_at
+                        else None
+                    ),
+                }
+                for a in recent_alerts
+            ],
+            "now": datetime.now().isoformat(),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in debug status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================================
+# Twilio SMS Webhook - Receive and respond to incoming texts
+# ============================================================================
+
+def twiml_response(message: str) -> PlainTextResponse:
+    """Create a TwiML response to reply to an SMS."""
+    twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>{message}</Message>
+</Response>"""
+    return PlainTextResponse(content=twiml, media_type="application/xml")
+
+
+@app.post("/api/sms/webhook", response_class=PlainTextResponse)
+async def sms_webhook(
+    From: str = Form(...),
+    To: str = Form(...),
+    Body: str = Form(...),
+) -> PlainTextResponse:
+    """
+    Twilio webhook endpoint for incoming SMS.
+    
+    Commands:
+        <SYMBOL>     - Get current price and quick analysis (e.g., "AAPL")
+        ADD <SYMBOL> - Add stock to watchlist
+        REMOVE <SYMBOL> - Remove stock from watchlist
+        LIST         - Show current watchlist
+        STATUS       - Get alert status summary
+        HELP         - Show available commands
+    """
+    logger.info(f"incoming sms from {From}: {Body}")
+    
+    # Parse the command
+    text = Body.strip().upper()
+    parts = text.split()
+    
+    if not parts:
+        return twiml_response("empty message. text 'tutorial' for help.")
+    
+    command = parts[0].lower()
+    
+    try:
+        # HELP/TUTORIAL command
+        if command in ("tutorial", "help"):
+            return twiml_response(
+                "stockstalk commands:\n"
+                "aapl - get stock info\n"
+                "add aapl - add to watchlist\n"
+                "remove aapl - remove from list\n"
+                "list - show watchlist\n"
+                "status - alert summary"
+            )
+        
+        # LIST command
+        if command == "list":
+            config_manager = _config_manager or ConfigManager()
+            config = config_manager.load_config()
+            symbols = [item.symbol.lower() for item in config.watchlist]
+            if symbols:
+                return twiml_response(f"watchlist ({len(symbols)}):\n" + ", ".join(symbols))
+            else:
+                return twiml_response("watchlist is empty. text 'add <symbol>' to add stocks.")
+        
+        # STATUS command
+        if command == "status":
+            db = get_database()
+            alerts_last_hour = await db.get_alerts_count_since(minutes=60)
+            recent_alerts = await db.get_alerts(limit=5)
+            
+            msg = f"alerts (1hr): {alerts_last_hour}\n"
+            if recent_alerts:
+                msg += "recent:\n"
+                for a in recent_alerts[:3]:
+                    msg += f"- {a.symbol.lower()}/{a.indicator.lower()}\n"
+            return twiml_response(msg)
+        
+        # ADD command
+        if command == "add" and len(parts) >= 2:
+            symbol = parts[1].upper()
+            config_manager = _config_manager or ConfigManager()
+            config = config_manager.load_config()
+            
+            # Check if already in watchlist
+            existing = [item for item in config.watchlist if item.symbol == symbol]
+            if existing:
+                return twiml_response(f"{symbol.lower()} is already in your watchlist.")
+            
+            # Add with default indicators
+            new_item = WatchlistItem(
+                symbol=symbol,
+                enabled_indicators=["RSI", "MACD", "Fundamental_Score"],
+            )
+            config.watchlist.append(new_item)
+            config_manager.save_config(config)
+            return twiml_response(f"added {symbol.lower()} to watchlist")
+        
+        # REMOVE command
+        if command in ("remove", "delete", "rm") and len(parts) >= 2:
+            symbol = parts[1].upper()
+            config_manager = _config_manager or ConfigManager()
+            config = config_manager.load_config()
+            
+            original_len = len(config.watchlist)
+            config.watchlist = [item for item in config.watchlist if item.symbol != symbol]
+            
+            if len(config.watchlist) < original_len:
+                config_manager.save_config(config)
+                return twiml_response(f"removed {symbol.lower()} from watchlist")
+            else:
+                return twiml_response(f"{symbol.lower()} not found in watchlist")
+        
+        # Assume it's a stock symbol - run full analysis
+        symbol = command.upper()
+        data_fetcher = StockDataFetcher()
+        
+        try:
+            # Fetch stock data
+            stock_data, historical_data = await data_fetcher.get_stock_data(symbol, days=30)
+            
+            price = stock_data.current_price
+            prev_close = stock_data.previous_close
+            change = ((price - prev_close) / prev_close) * 100 if prev_close else 0
+            
+            # Direction indicator
+            if change > 0:
+                direction = "up"
+            elif change < 0:
+                direction = "down"
+            else:
+                direction = "flat"
+            
+            # Start building message with price info
+            msg = f"{symbol.lower()}\n"
+            msg += f"${price:.2f} ({change:+.2f}%) {direction}\n"
+            if stock_data.volume:
+                msg += f"vol: {stock_data.volume:,.0f}\n"
+            msg += "\n"
+            
+            # Run all available indicators
+            all_indicators = IndicatorRegistry.list_indicators()
+            
+            triggered_signals = []
+            metrics = []
+            
+            for indicator_name in all_indicators:
+                try:
+                    indicator = IndicatorRegistry.get_indicator(indicator_name)
+                    result = indicator.analyze(stock_data, historical_data)
+                    
+                    if result.is_triggered:
+                        priority_prefix = "[!] " if result.priority.value in ("high", "critical") else ""
+                        triggered_signals.append(f"{priority_prefix}{indicator_name.lower().replace('_', ' ')}")
+                    
+                    # Extract all available metrics from metadata
+                    meta = result.metadata
+                    
+                    # Technical indicators
+                    if "rsi" in meta and meta["rsi"]:
+                        metrics.append(f"rsi: {meta['rsi']:.1f}")
+                    if "macd" in meta:
+                        metrics.append(f"macd: {meta['macd']:.2f}")
+                    if "signal_line" in meta:
+                        metrics.append(f"macd signal: {meta['signal_line']:.2f}")
+                    if "volume_ratio" in meta and meta["volume_ratio"]:
+                        metrics.append(f"vol ratio: {meta['volume_ratio']:.1f}x")
+                    if "price_change_pct" in meta:
+                        metrics.append(f"price chg: {meta['price_change_pct']:.1f}%")
+                    if "sma_short" in meta and "sma_long" in meta:
+                        metrics.append(f"sma 20/50: {meta['sma_short']:.2f}/{meta['sma_long']:.2f}")
+                    
+                    # Fundamental indicators
+                    if "score" in meta and indicator_name == "Fundamental_Score":
+                        metrics.append(f"fundamental: {meta['score']:.0f}/100")
+                    if "peg_ratio" in meta and meta["peg_ratio"] and meta["peg_ratio"] > 0:
+                        metrics.append(f"peg: {meta['peg_ratio']:.2f}")
+                    if "pe_ratio" in meta and meta["pe_ratio"]:
+                        metrics.append(f"p/e: {meta['pe_ratio']:.1f}")
+                    if "roic" in meta and meta["roic"]:
+                        metrics.append(f"roic: {meta['roic']:.1f}%")
+                    if "debt_to_equity" in meta and meta["debt_to_equity"]:
+                        metrics.append(f"d/e: {meta['debt_to_equity']:.2f}")
+                    if "operating_margin" in meta and meta["operating_margin"]:
+                        metrics.append(f"op margin: {meta['operating_margin']:.1f}%")
+                    if "free_cash_flow" in meta and meta["free_cash_flow"]:
+                        fcf = meta["free_cash_flow"]
+                        if abs(fcf) >= 1e9:
+                            metrics.append(f"fcf: ${fcf/1e9:.1f}b")
+                        elif abs(fcf) >= 1e6:
+                            metrics.append(f"fcf: ${fcf/1e6:.1f}m")
+                    if "revenue_growth" in meta and meta["revenue_growth"]:
+                        metrics.append(f"rev growth: {meta['revenue_growth']:.1f}%")
+                    if "earnings_growth" in meta and meta["earnings_growth"]:
+                        metrics.append(f"earnings growth: {meta['earnings_growth']:.1f}%")
+                        
+                except Exception as e:
+                    logger.debug(f"indicator {indicator_name} failed for {symbol}: {e}")
+            
+            # Remove duplicates while preserving order
+            seen = set()
+            unique_metrics = []
+            for m in metrics:
+                if m not in seen:
+                    seen.add(m)
+                    unique_metrics.append(m)
+            
+            # Add metrics
+            if unique_metrics:
+                msg += "metrics:\n"
+                msg += "\n".join(unique_metrics)
+                msg += "\n\n"
+            
+            # Add triggered signals
+            if triggered_signals:
+                msg += "signals:\n"
+                msg += "\n".join(triggered_signals)
+            else:
+                msg += "no signals triggered"
+            
+            return twiml_response(msg)
+            
+        except Exception as e:
+            logger.error(f"error fetching {symbol}: {e}", exc_info=True)
+            return twiml_response(f"could not find stock: {symbol.lower()}")
+    
+    except Exception as e:
+        logger.error(f"error processing sms command: {e}", exc_info=True)
+        return twiml_response("error processing command. try again or text 'tutorial'.")

@@ -1,10 +1,9 @@
-"""Notification service for sending alerts via AWS SNS."""
+"""Notification service for sending alerts via Twilio SMS."""
 
 import logging
 import os
-from typing import Any
 
-import aioboto3
+import httpx
 
 from stockstalk.models import AlertPriority, IndicatorResult, NotificationConfig
 
@@ -12,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 class NotificationService:
-    """Async service for sending SMS notifications via AWS SNS."""
+    """Async service for sending SMS notifications via Twilio."""
+
+    TWILIO_API_URL = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 
     def __init__(self, config: NotificationConfig) -> None:
         """
@@ -22,11 +23,15 @@ class NotificationService:
             config: Notification configuration
         """
         self.config = config
-        self._session = aioboto3.Session(
-            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-            region_name=os.getenv("AWS_REGION", "us-east-1"),
-        )
+        self.account_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
+        self.auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
+        self.from_number = os.getenv("TWILIO_PHONE_NUMBER", "")
+
+        if not all([self.account_sid, self.auth_token, self.from_number]):
+            logger.warning(
+                "Twilio credentials not fully configured. "
+                "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER"
+            )
 
     def should_notify(self, result: IndicatorResult) -> bool:
         """
@@ -39,6 +44,7 @@ class NotificationService:
             True if notification should be sent
         """
         if not result.is_triggered:
+            logger.debug(f"  {result.symbol}/{result.indicator_name}: not triggered")
             return False
 
         # Check if priority meets minimum threshold
@@ -49,11 +55,17 @@ class NotificationService:
             AlertPriority.CRITICAL: 3,
         }
 
-        return priority_order[result.priority] >= priority_order[self.config.min_priority]
+        meets_threshold = priority_order[result.priority] >= priority_order[self.config.min_priority]
+        if not meets_threshold:
+            logger.info(
+                f"  {result.symbol}/{result.indicator_name}: priority {result.priority.value} "
+                f"< min threshold {self.config.min_priority.value}"
+            )
+        return meets_threshold
 
     async def send_sms(self, phone_number: str, message: str) -> bool:
         """
-        Send a single SMS via AWS SNS.
+        Send a single SMS via Twilio.
 
         Args:
             phone_number: Phone number in E.164 format (e.g., +14155551234)
@@ -62,24 +74,41 @@ class NotificationService:
         Returns:
             True if message was sent successfully
         """
+        if not all([self.account_sid, self.auth_token, self.from_number]):
+            logger.error("twilio credentials not configured")
+            return False
+
+        url = self.TWILIO_API_URL.format(account_sid=self.account_sid)
+
+        # Clean up phone number format (remove dashes)
+        clean_to_number = phone_number.replace("-", "")
+        clean_from_number = self.from_number.replace("-", "")
+
         try:
-            async with self._session.client("sns") as sns:
-                response = await sns.publish(
-                    PhoneNumber=phone_number,
-                    Message=message,
-                    MessageAttributes={
-                        "AWS.SNS.SMS.SMSType": {
-                            "DataType": "String",
-                            "StringValue": "Transactional",  # Higher delivery priority
-                        }
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    url,
+                    auth=(self.account_sid, self.auth_token),
+                    data={
+                        "To": clean_to_number,
+                        "From": clean_from_number,
+                        "Body": message,
                     },
                 )
-                message_id = response.get("MessageId")
-                logger.info(f"SMS sent to {phone_number}, MessageId: {message_id}")
-                return True
+
+                if response.status_code == 201:
+                    data = response.json()
+                    sid = data.get("sid", "unknown")
+                    logger.info(f"sms sent to {phone_number}, sid: {sid}")
+                    return True
+                else:
+                    error_data = response.json() if response.content else {}
+                    error_msg = error_data.get("message", response.text)
+                    logger.error(f"twilio error ({response.status_code}): {error_msg}")
+                    return False
 
         except Exception as e:
-            logger.error(f"Failed to send SMS to {phone_number}: {e}")
+            logger.error(f"failed to send sms to {phone_number}: {e}", exc_info=True)
             return False
 
     async def send_notification(self, result: IndicatorResult) -> dict[str, bool]:
@@ -96,13 +125,13 @@ class NotificationService:
 
         if not self.should_notify(result):
             logger.debug(
-                f"Skipping notification for {result.symbol} - "
+                f"skipping notification for {result.symbol} - "
                 f"priority {result.priority} below threshold"
             )
             return results
 
         if not self.config.phone_numbers:
-            logger.warning("No phone numbers configured for notifications")
+            logger.warning("no phone numbers configured for notifications")
             return results
 
         # Format the message
@@ -117,15 +146,14 @@ class NotificationService:
 
     def _format_message(self, result: IndicatorResult) -> str:
         """Format indicator result into SMS message."""
-        # Keep it concise for SMS
-        priority_emoji = {
-            AlertPriority.LOW: "📊",
-            AlertPriority.MEDIUM: "📈",
-            AlertPriority.HIGH: "🔔",
-            AlertPriority.CRITICAL: "🚨",
+        priority_label = {
+            AlertPriority.LOW: "",
+            AlertPriority.MEDIUM: "",
+            AlertPriority.HIGH: "[!] ",
+            AlertPriority.CRITICAL: "[!!] ",
         }
-        emoji = priority_emoji.get(result.priority, "📊")
-        return f"{emoji} {result.symbol}: {result.message}"
+        prefix = priority_label.get(result.priority, "")
+        return f"{prefix}{result.symbol}: {result.message}".lower()
 
     async def notify(self, result: IndicatorResult) -> dict[str, bool]:
         """
@@ -151,7 +179,7 @@ class NotificationService:
         """
         return await self.send_sms(
             phone_number,
-            "🧪 StockStalk test message - your notifications are working!",
+            "stockstalk test - notifications are working",
         )
 
     async def send_digest(
@@ -175,11 +203,11 @@ class NotificationService:
         triggered = [r for r in results if self.should_notify(r)]
 
         if not triggered:
-            logger.debug("No alerts meet notification threshold for digest")
+            logger.info("no alerts meet notification threshold for digest")
             return {}
 
         if not self.config.phone_numbers:
-            logger.warning("No phone numbers configured for notifications")
+            logger.warning("no phone numbers configured for notifications")
             return {}
 
         # Sort by priority (CRITICAL > HIGH > MEDIUM) and signal strength
@@ -219,111 +247,24 @@ class NotificationService:
         if total_count is None:
             total_count = len(results)
 
-        # Build message - one line per alert, simple and clear
-        lines = ["📊 StockStalk Top Signals:"]
+        # Build compact message
+        lines = ["stockstalk alerts:"]
 
-        for r in results[:10]:  # Top 10 alerts
-            # Get priority emoji
-            if r.priority == AlertPriority.CRITICAL:
-                emoji = "🚨"
-            elif r.priority == AlertPriority.HIGH:
-                emoji = "🔔"
+        for symbol, symbol_results in by_symbol.items():
+            # Get highest priority for this symbol
+            priorities = [r.priority for r in symbol_results]
+            if AlertPriority.CRITICAL in priorities:
+                prefix = "[!!] "
+            elif AlertPriority.HIGH in priorities:
+                prefix = "[!] "
             else:
-                emoji = "📈"
+                prefix = ""
 
-            # Get the short metric message
-            metric = self._get_short_message(r)
-
-            # Simple format: 🔔 NVDA: ROIC 107%
-            lines.append(f"{emoji} {r.symbol}: {metric}")
+            # Summarize indicators
+            indicators = [r.indicator_name.replace("_", " ") for r in symbol_results]
+            lines.append(f"{prefix}{symbol}: {', '.join(indicators)}")
 
         # Add count summary
-        if total_count > 10:
-            lines.append(f"\nTop 10 of {total_count} signals")
+        lines.append(f"total: {len(results)} signals, {len(by_symbol)} stocks")
 
-        return "\n".join(lines)
-
-    def _get_short_message(self, result: IndicatorResult) -> str:
-        """Extract a short message with key metrics from an indicator result."""
-        meta = result.metadata
-        name = result.indicator_name
-
-        # Volume Spike - show ratio and price change
-        if name == "Volume_Spike" and meta.get("volume_ratio"):
-            ratio = meta["volume_ratio"]
-            pct = meta.get("price_change_pct", 0)
-            direction = "↑" if pct > 0 else "↓"
-            return f"Vol {ratio:.1f}x avg, price {direction}{abs(pct):.1f}%"
-
-        # RSI - show value and condition
-        if name == "RSI" and meta.get("rsi"):
-            rsi = meta["rsi"]
-            if rsi >= 70:
-                return f"RSI {rsi:.0f} OVERBOUGHT"
-            elif rsi <= 30:
-                return f"RSI {rsi:.0f} OVERSOLD"
-            return f"RSI {rsi:.0f}"
-
-        # ROIC
-        if name == "ROIC" and meta.get("roic_estimate"):
-            roic = meta["roic_estimate"] * 100
-            return f"ROIC {roic:.0f}%"
-
-        # Operating Margins
-        if name == "Operating_Margins" and meta.get("operating_margins"):
-            margin = meta["operating_margins"] * 100
-            return f"Op Margin {margin:.0f}%"
-
-        # Revenue Growth
-        if name == "Revenue_Growth" and meta.get("revenue_growth"):
-            growth = meta["revenue_growth"] * 100
-            return f"Rev +{growth:.0f}%"
-
-        # Earnings Growth
-        if name == "Earnings_Growth" and meta.get("earnings_growth"):
-            growth = meta["earnings_growth"] * 100
-            return f"EPS +{growth:.0f}%"
-
-        # Free Cash Flow
-        if name == "Free_Cash_Flow" and meta.get("fcf"):
-            fcf = meta["fcf"]
-            if fcf >= 1e9:
-                return f"FCF ${fcf / 1e9:.1f}B"
-            elif fcf >= 1e6:
-                return f"FCF ${fcf / 1e6:.0f}M"
-            return f"FCF ${fcf:,.0f}"
-
-        # Debt to Equity
-        if name == "Debt_To_Equity" and meta.get("debt_to_equity") is not None:
-            de = meta["debt_to_equity"]
-            return f"D/E {de:.2f}"
-
-        # Price Change
-        if name == "Price_Change" and meta.get("price_change_pct"):
-            pct = meta["price_change_pct"]
-            direction = "↑" if pct > 0 else "↓"
-            return f"Price {direction}{abs(pct):.1f}%"
-
-        # Fundamental Score
-        if name == "Fundamental_Score" and meta.get("score") is not None:
-            score = meta["score"]
-            max_score = meta.get("max_score", 7)
-            return f"Score {score}/{max_score}"
-
-        # MACD
-        if name == "MACD":
-            if "bullish" in result.message.lower():
-                return "MACD bullish crossover"
-            elif "bearish" in result.message.lower():
-                return "MACD bearish crossover"
-            return "MACD signal"
-
-        # Fallback - use first part of message
-        msg = result.message
-        # Remove symbol prefix if present
-        if msg.startswith(result.symbol):
-            msg = msg[len(result.symbol) :].strip(" :-")
-        # Truncate if too long
-        if len(msg) > 40:
-            msg = msg[:37] + "..."
-        return msg
+        return "\n".join(lines).lower()
