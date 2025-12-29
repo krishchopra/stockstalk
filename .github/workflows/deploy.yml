@@ -18,37 +18,40 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Deploy via EC2 Instance Connect
+      - name: Deploy via EC2 Instance Connect Endpoint
+        env:
+          INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
-          # Install EC2 Instance Connect CLI
-          pip install ec2instanceconnectcli
+          # Use AWS CLI to connect through the EIC Endpoint
+          aws ec2-instance-connect ssh \
+            --instance-id $INSTANCE_ID \
+            --os-user ec2-user \
+            --connection-type eice \
+            --command '
+              set -e
+              echo "Navigating to project directory..."
+              cd ~/stockstalk
 
-          # Connect and run deploy commands
-          mssh ec2-user@i-099ca5d47d4171f21 --region us-east-1 << 'EOF'
-            set -e
-            echo "Navigating to project directory..."
-            cd ~/stockstalk
+              echo "Pulling latest changes..."
+              git pull origin main
 
-            echo "Pulling latest changes..."
-            git pull origin main
+              echo "Current commit:"
+              git log -1 --oneline
 
-            echo "Current commit:"
-            git log -1 --oneline
+              echo "🛑 Stopping existing containers..."
+              docker-compose down
 
-            echo "🛑 Stopping existing containers..."
-            docker-compose down
+              echo "🔨 Building and starting containers..."
+              docker-compose up --build -d
 
-            echo "🔨 Building and starting containers..."
-            docker-compose up --build -d
+              echo "⏳ Waiting for container to be healthy..."
+              sleep 5
 
-            echo "⏳ Waiting for container to be healthy..."
-            sleep 5
+              echo "Container status:"
+              docker-compose ps
 
-            echo "Container status:"
-            docker-compose ps
+              echo "Recent logs:"
+              docker-compose logs --tail=20
 
-            echo "Recent logs:"
-            docker-compose logs --tail=20
-
-            echo "✅ Deployment complete!"
-          EOF
+              echo "✅ Deployment complete!"
+            '
