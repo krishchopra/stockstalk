@@ -11,26 +11,20 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Debug - Test network connectivity
-        run: |
-          echo "GitHub Runner IP:"
-          curl -s https://api.ipify.org
-          echo ""
-          echo "Testing TCP connection to EC2..."
-          nc -zv ${{ secrets.EC2_HOST }} 22 -w 10 || echo "NC connection failed"
-          echo "Testing with timeout..."
-          timeout 10 bash -c "cat < /dev/null > /dev/tcp/${{ secrets.EC2_HOST }}/22" && echo "TCP connection succeeded" || echo "TCP connection failed"
-
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          timeout: 60s
-          command_timeout: 30m
-          debug: true
-          script: |
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Deploy via EC2 Instance Connect
+        run: |
+          # Install EC2 Instance Connect CLI
+          pip install ec2instanceconnectcli
+
+          # Connect and run deploy commands
+          mssh ec2-user@i-099ca5d47d4171f21 --region us-east-1 << 'EOF'
             set -e
             echo "Navigating to project directory..."
             cd ~/stockstalk
@@ -57,3 +51,4 @@ jobs:
             docker-compose logs --tail=20
 
             echo "✅ Deployment complete!"
+          EOF
