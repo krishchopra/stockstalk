@@ -1,4 +1,4 @@
-"""AI-powered investment assistant using OpenAI gpt-5-nano with function calling."""
+"""AI-powered investment assistant using OpenAI gpt-5-mini with function calling."""
 
 import asyncio
 import json
