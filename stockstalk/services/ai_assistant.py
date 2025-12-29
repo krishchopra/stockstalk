@@ -511,57 +511,81 @@ class AIAssistant:
     async def _tool_web_search(self, query: str) -> dict[str, Any]:
         """Search the web using DuckDuckGo."""
         try:
+            logger.info(f"Web search query: {query}")
             # Use DuckDuckGo's HTML search (no API key needed)
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     "https://html.duckduckgo.com/html/",
                     params={"q": query},
-                    headers={"User-Agent": "Mozilla/5.0 (compatible; StockStalk/1.0)"},
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                    },
                 )
 
+                logger.info(f"DuckDuckGo response status: {response.status_code}")
                 if response.status_code != 200:
-                    return {"error": "Search failed", "results": []}
+                    error_preview = (
+                        response.text[:150] if response.text else "no response body"
+                    )
+                    logger.error(
+                        f"DuckDuckGo returned status {response.status_code}: {error_preview}"
+                    )
+                    return {
+                        "message": f"search failed: HTTP {response.status_code}\n\n[debug: DDG status {response.status_code}, body: {error_preview[:50]}...]"
+                    }
 
                 # Parse the HTML response for search results
                 html = response.text
+                logger.debug(f"HTML response length: {len(html)} chars")
                 results = []
 
-                # Extract result snippets using simple parsing
-                # DuckDuckGo HTML results are in <a class="result__a"> and <a class="result__snippet">
-                # Find all result blocks
+                # Try multiple parsing strategies for DuckDuckGo
+                # Strategy 1: Look for result links and snippets
                 result_pattern = re.compile(
-                    r'class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>.*?'
-                    r'class="result__snippet"[^>]*>([^<]*)',
-                    re.DOTALL,
+                    r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>',
+                    re.IGNORECASE | re.DOTALL,
                 )
+                title_matches = result_pattern.findall(html)
 
-                matches = result_pattern.findall(html)
-                for match in matches[:5]:  # Top 5 results
-                    url, title, snippet = match
-                    if title.strip() and snippet.strip():
+                # Strategy 2: Look for snippets
+                snippet_pattern = re.compile(
+                    r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([^<]+)</a>',
+                    re.IGNORECASE | re.DOTALL,
+                )
+                snippet_matches = snippet_pattern.findall(html)
+
+                # Strategy 3: Look for any result divs
+                if not title_matches:
+                    result_div_pattern = re.compile(
+                        r'<div[^>]*class="[^"]*result[^"]*"[^>]*>.*?<a[^>]*href="([^"]*)"[^>]*>([^<]*)</a>',
+                        re.IGNORECASE | re.DOTALL,
+                    )
+                    title_matches = result_div_pattern.findall(html)
+
+                # Combine results
+                for i, (url, title) in enumerate(title_matches[:5]):
+                    snippet = snippet_matches[i] if i < len(snippet_matches) else ""
+                    if title.strip():
                         results.append(
                             {
                                 "title": title.strip(),
-                                "snippet": snippet.strip()[:200],
-                                "url": url,
+                                "snippet": snippet.strip()[:200] if snippet else "",
+                                "url": url
+                                if url.startswith("http")
+                                else f"https://{url}",
                             }
                         )
 
-                # If regex didn't work well, try a simpler approach
+                logger.info(f"Found {len(results)} search results")
+
+                # Debug: log if no results found
                 if not results:
-                    # Look for result__snippet divs
-                    snippet_pattern = re.compile(
-                        r"result__snippet[^>]*>([^<]+)<", re.DOTALL
+                    logger.warning(
+                        f"No results parsed from HTML. HTML length: {len(html)}, first 500 chars: {html[:500]}"
                     )
-                    snippets = snippet_pattern.findall(html)
-                    for i, snippet in enumerate(snippets[:5]):
-                        if snippet.strip():
-                            results.append(
-                                {
-                                    "title": f"Result {i + 1}",
-                                    "snippet": snippet.strip()[:200],
-                                }
-                            )
+                    return {
+                        "message": f"no results found for '{query}'. try a different search.\n\n[debug: parsed 0 results from {len(html)} char HTML, status {response.status_code}]"
+                    }
 
                 if results:
                     # Format results into a readable message
@@ -585,10 +609,23 @@ class AIAssistant:
                         "message": f"no results found for '{query}'. try a different search.",
                     }
 
-        except Exception as e:
-            logger.error(f"Web search error: {e}")
+        except httpx.TimeoutException:
+            logger.error("Web search timed out")
             return {
-                "message": f"search failed: {str(e)}. try again or rephrase your query."
+                "message": "search timed out. try again with a simpler query.\n\n[debug: timeout after 10s]"
+            }
+        except httpx.RequestError as e:
+            logger.error(f"Web search request error: {e}", exc_info=True)
+            error_msg = str(e)[:100]  # Truncate long errors
+            return {
+                "message": f"search request failed: {error_msg}\n\n[debug: httpx request error]"
+            }
+        except Exception as e:
+            logger.error(f"Web search error: {e}", exc_info=True)
+            error_type = type(e).__name__
+            error_msg = str(e)[:100]
+            return {
+                "message": f"search failed: {error_type}: {error_msg}\n\n[debug: exception in web_search]"
             }
 
     # =========================================================================
