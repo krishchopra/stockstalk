@@ -282,26 +282,33 @@ class StockAnalyzer:
         # Send consolidated digest or individual alerts
         if alerts_to_send:
             if digest_mode:
-                await self._send_digest(alerts_to_send)
+                await self._send_digest(alerts_to_send, results)
             else:
                 for alert in alerts_to_send:
                     await self._send_alert(alert)
 
         return results
 
-    async def _send_digest(self, results: list[IndicatorResult]) -> bool:
+    async def _send_digest(
+        self,
+        results: list[IndicatorResult],
+        all_results_by_symbol: dict[str, list[IndicatorResult]] | None = None,
+    ) -> bool:
         """
         Send a consolidated digest of alerts and record them.
 
         Args:
             results: List of triggered indicator results
+            all_results_by_symbol: All results grouped by symbol (for showing triggered/total)
 
         Returns:
             True if digest was sent successfully
         """
         try:
             # Send digest notification
-            send_results = await self.notifier.send_digest(results)
+            send_results = await self.notifier.send_digest(
+                results, all_results_by_symbol=all_results_by_symbol
+            )
 
             if not send_results:
                 logger.warning("No digest notifications sent")

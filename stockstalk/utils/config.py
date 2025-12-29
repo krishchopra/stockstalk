@@ -4,7 +4,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
 
 from stockstalk.models import AppConfig
 
@@ -66,51 +65,61 @@ class ConfigManager:
 
     def _get_default_config(self) -> AppConfig:
         """
-        Get default configuration.
+        Get default configuration with VTI top 1000 holdings.
 
         Returns:
-            Default AppConfig
+            Default AppConfig with VTI watchlist
         """
         from stockstalk.models import NotificationConfig, WatchlistItem
+        from stockstalk.services.etf_holdings import (
+            DEFAULT_VTI_INDICATORS,
+            ETFHoldingsFetcher,
+        )
 
         # Load phone numbers from environment if available
         phone_numbers = os.getenv("PHONE_NUMBERS", "").split(",")
         phone_numbers = [p.strip() for p in phone_numbers if p.strip()]
 
-        # Default indicators - Volume_Spike is critical for catching momentum
-        default_indicators = ["RSI", "MACD", "Volume_Spike", "Price_Change"]
+        # Get default number of stocks from env, default to 500
+        default_top_n = int(os.getenv("VTI_TOP_N", "500"))
+
+        # Generate watchlist from VTI top holdings (uses curated list)
+        logger.info(f"Generating default watchlist from VTI top {default_top_n} holdings...")
+        fetcher = ETFHoldingsFetcher("VTI")
+        holdings = fetcher._get_curated_vti_holdings()[:default_top_n]
+
+        # Remove duplicates
+        seen = set()
+        watchlist = []
+        for holding in holdings:
+            symbol = holding["symbol"]
+            if symbol in seen or not symbol or len(symbol) > 10:
+                continue
+            seen.add(symbol)
+
+            # Top 50 get fundamental analysis too
+            if len(watchlist) < 50:
+                indicators = DEFAULT_VTI_INDICATORS + ["Fundamental_Score"]
+            else:
+                indicators = DEFAULT_VTI_INDICATORS.copy()
+
+            watchlist.append(
+                WatchlistItem(
+                    symbol=symbol,
+                    enabled_indicators=list(set(indicators)),
+                    custom_params={},
+                )
+            )
+
+        logger.info(f"Default watchlist: {len(watchlist)} stocks with Volume_Spike enabled")
 
         return AppConfig(
-            watchlist=[
-                WatchlistItem(
-                    symbol="AAPL",
-                    enabled_indicators=default_indicators + ["Fundamental_Score"],
-                ),
-                WatchlistItem(
-                    symbol="MSFT",
-                    enabled_indicators=default_indicators + ["Fundamental_Score"],
-                ),
-                WatchlistItem(
-                    symbol="GOOGL",
-                    enabled_indicators=default_indicators + ["Fundamental_Score"],
-                ),
-                WatchlistItem(
-                    symbol="NVDA",
-                    enabled_indicators=default_indicators + ["Fundamental_Score"],
-                ),
-                WatchlistItem(
-                    symbol="TSLA",
-                    enabled_indicators=default_indicators,
-                    custom_params={
-                        "Volume_Spike": {
-                            "spike_threshold": 2.5
-                        },  # Higher threshold for volatile stock
-                    },
-                ),
-            ],
+            watchlist=watchlist,
             notification_config=NotificationConfig(
                 phone_numbers=phone_numbers,
+                cooldown_minutes=60,
+                max_alerts_per_hour=10,  # Higher limit for more stocks
             ),
-            check_interval_minutes=15,
+            check_interval_minutes=60,  # Hourly for large watchlist
             data_lookback_days=30,
         )

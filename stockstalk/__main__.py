@@ -29,12 +29,13 @@ logging.getLogger("apscheduler").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def run_analysis_async(config_path: Path) -> None:
+async def run_analysis_async(config_path: Path, dry_run: bool = False) -> None:
     """
     Run stock analysis for all watchlist items asynchronously.
 
     Args:
         config_path: Path to configuration file
+        dry_run: If True, analyze but don't send SMS notifications
     """
     from stockstalk.services.analyzer import StockAnalyzer
     from stockstalk.services.data_fetcher import StockDataFetcher
@@ -43,8 +44,9 @@ async def run_analysis_async(config_path: Path) -> None:
     from stockstalk.utils.config import ConfigManager
 
     try:
+        mode_str = "DRY-RUN (no SMS)" if dry_run else "LIVE"
         logger.info("=" * 60)
-        logger.info("Starting stock analysis run")
+        logger.info(f"Starting stock analysis run [{mode_str}]")
         logger.info("=" * 60)
 
         # Initialize database
@@ -68,8 +70,21 @@ async def run_analysis_async(config_path: Path) -> None:
             lookback_days=config.data_lookback_days,
         )
 
-        # Analyze all stocks in watchlist
-        results = await analyzer.analyze_watchlist(config.watchlist)
+        # Analyze all stocks (don't send alerts in dry-run mode)
+        if dry_run:
+            # Analyze without sending notifications
+            all_results = {}
+            all_alerts = []
+            for item in config.watchlist:
+                item_results = await analyzer.analyze_stock(item, send_alerts=False)
+                all_results[item.symbol] = item_results
+                for r in item_results:
+                    if r.is_triggered:
+                        all_alerts.append(r)
+            results = all_results
+        else:
+            results = await analyzer.analyze_watchlist(config.watchlist)
+            all_alerts = []
 
         # Log summary
         for symbol, indicator_results in results.items():
@@ -77,6 +92,24 @@ async def run_analysis_async(config_path: Path) -> None:
             logger.info(
                 f"{symbol}: {triggered_count}/{len(indicator_results)} indicators triggered"
             )
+
+        # In dry-run mode, print what would be sent as SMS
+        if dry_run and all_alerts:
+            print("\n" + "=" * 60)
+            print("📱 SMS DIGEST (what would be sent):")
+            print("=" * 60)
+
+            # Use the notifier's formatting logic
+            from stockstalk.models import NotificationConfig
+            from stockstalk.services.notifier import NotificationService
+
+            temp_notifier = NotificationService(NotificationConfig())
+            # Pass all_results so we can show triggered/total for each stock
+            digest_msg = temp_notifier._format_digest(
+                all_alerts[:10], len(all_alerts), all_results_by_symbol=all_results
+            )
+            print(digest_msg)
+            print("=" * 60)
 
         logger.info("=" * 60)
         logger.info("Analysis run completed")
@@ -294,6 +327,11 @@ def main() -> None:
         help="ETF symbol to fetch holdings from (default: VTI)",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Analyze stocks but don't send SMS (shows what would be sent)",
+    )
+    parser.add_argument(
         "--host",
         type=str,
         default="0.0.0.0",
@@ -325,9 +363,9 @@ def main() -> None:
         # Run API server
         run_server(args.config, args.host, args.port)
 
-    elif args.once:
-        # Run analysis once
-        asyncio.run(run_analysis_async(args.config))
+    elif args.once or args.dry_run:
+        # Run analysis once (with optional dry-run mode)
+        asyncio.run(run_analysis_async(args.config, dry_run=args.dry_run))
 
     else:
         # Run scheduled analysis
