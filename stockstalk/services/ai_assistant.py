@@ -558,21 +558,32 @@ class AIAssistant:
                             )
 
                 if results:
+                    # Format results into a readable message
+                    lines = [f"found {len(results)} results for '{query}':"]
+                    for i, result in enumerate(results, 1):
+                        title = result.get("title", "Result")
+                        snippet = result.get("snippet", "")
+                        url = result.get("url", "")
+                        lines.append(f"\n{i}. {title}")
+                        if snippet:
+                            lines.append(f"   {snippet}")
+                        if url:
+                            lines.append(f"   {url}")
+
                     return {
-                        "query": query,
-                        "results": results,
-                        "count": len(results),
+                        "message": "\n".join(lines),
+                        "results": results,  # Keep structured data for reference
                     }
                 else:
                     return {
-                        "query": query,
-                        "results": [],
-                        "message": "No results found. Try a different query.",
+                        "message": f"no results found for '{query}'. try a different search.",
                     }
 
         except Exception as e:
             logger.error(f"Web search error: {e}")
-            return {"error": f"Search failed: {str(e)}", "results": []}
+            return {
+                "message": f"search failed: {str(e)}. try again or rephrase your query."
+            }
 
     # =========================================================================
     # Tool Execution Engine
