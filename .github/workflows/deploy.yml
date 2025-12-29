@@ -27,20 +27,7 @@ jobs:
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
-              "set -e",
-              "cd /home/ec2-user/stockstalk",
-              "echo Pulling latest changes...",
-              "git pull origin main",
-              "echo Current commit:",
-              "git log -1 --oneline",
-              "echo Stopping existing containers...",
-              "docker-compose down",
-              "echo Building and starting containers...",
-              "docker-compose up --build -d",
-              "sleep 5",
-              "echo Container status:",
-              "docker-compose ps",
-              "echo Deployment complete!"
+              "sudo -u ec2-user bash -c '\''set -e && cd ~/stockstalk && echo Pulling latest changes... && git pull origin main && echo Current commit: && git log -1 --oneline && echo Stopping existing containers... && docker-compose down && echo Building and starting containers... && docker-compose up --build -d && sleep 5 && echo Container status: && docker-compose ps && echo Deployment complete!'\''"
             ]' \
             --query 'Command.CommandId' \
             --output text)
