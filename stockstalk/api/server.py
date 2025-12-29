@@ -483,10 +483,20 @@ async def debug_status() -> dict:
 
 def twiml_response(message: str) -> PlainTextResponse:
     """Create a TwiML response to reply to an SMS."""
+    # Escape XML special characters
+    import html
+
+    # Truncate if too long (SMS limit is ~1600 chars, leave some buffer)
+    if len(message) > 1500:
+        message = message[:1497] + "..."
+
+    escaped_message = html.escape(message)
+
     twiml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <Response>
-    <Message>{message}</Message>
+    <Message>{escaped_message}</Message>
 </Response>"""
+    logger.debug(f"TwiML response length: {len(twiml)} chars")
     return PlainTextResponse(content=twiml, media_type="application/xml")
 
 
@@ -566,8 +576,12 @@ async def sms_webhook(
             if not response or not response.strip():
                 logger.warning("AI assistant returned empty response, using fallback")
                 response = "sorry, i didn't get that. try again?"
-            logger.info(f"AI response: {response[:100]}...")  # Log first 100 chars
-            return twiml_response(response.lower())
+            logger.info(
+                f"AI response ({len(response)} chars): {response[:100]}..."
+            )  # Log first 100 chars
+            twiml = twiml_response(response.lower())
+            logger.info("Sending TwiML response, status will be 200")
+            return twiml
         except Exception as e:
             logger.error(f"Error in AI chat: {e}", exc_info=True)
             return twiml_response(
