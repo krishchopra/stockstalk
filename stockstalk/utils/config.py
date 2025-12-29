@@ -36,9 +36,7 @@ class ConfigManager:
             FileNotFoundError: If config file doesn't exist
         """
         if not self.config_path.exists():
-            logger.warning(
-                f"Config file {self.config_path} not found. Creating default config."
-            )
+            logger.warning(f"Config file {self.config_path} not found. Creating default config.")
             default_config = self._get_default_config()
             self.save_config(default_config)
             return default_config

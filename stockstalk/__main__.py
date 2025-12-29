@@ -254,9 +254,7 @@ def main() -> None:
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(
-        description="StockStalk - Async Stock Monitoring App"
-    )
+    parser = argparse.ArgumentParser(description="StockStalk - Async Stock Monitoring App")
     parser.add_argument(
         "--config",
         type=Path,

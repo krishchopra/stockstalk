@@ -50,11 +50,7 @@ class ETFHoldingsFetcher:
                     for symbol, row in holdings_df.iterrows():
                         # Symbol is the index, weight is in the 'holdingPercent' column
                         if isinstance(symbol, str) and symbol:
-                            weight = (
-                                row.get("holdingPercent", row.iloc[0])
-                                if len(row) > 0
-                                else 0
-                            )
+                            weight = row.get("holdingPercent", row.iloc[0]) if len(row) > 0 else 0
                             holdings.append(
                                 {
                                     "symbol": symbol.upper(),
@@ -1171,7 +1167,5 @@ class ETFHoldingsFetcher:
                 )
             )
 
-        logger.info(
-            f"Generated watchlist with {len(watchlist)} stocks from {self.etf_symbol}"
-        )
+        logger.info(f"Generated watchlist with {len(watchlist)} stocks from {self.etf_symbol}")
         return watchlist
