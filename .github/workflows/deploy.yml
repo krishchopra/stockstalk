@@ -11,12 +11,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Debug - Test network connectivity
+        run: |
+          echo "GitHub Runner IP:"
+          curl -s https://api.ipify.org
+          echo ""
+          echo "Testing TCP connection to EC2..."
+          nc -zv ${{ secrets.EC2_HOST }} 22 -w 10 || echo "NC connection failed"
+          echo "Testing with timeout..."
+          timeout 10 bash -c "cat < /dev/null > /dev/tcp/${{ secrets.EC2_HOST }}/22" && echo "TCP connection succeeded" || echo "TCP connection failed"
+
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          timeout: 60s
+          command_timeout: 30m
+          debug: true
           script: |
             set -e
             echo "Navigating to project directory..."
