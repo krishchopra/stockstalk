@@ -611,7 +611,6 @@ class AIAssistant:
                     return await self._fallback_response(user_message, user_watchlist)
 
                 data = response.json()
-                logger.debug(f"OpenAI response: {data}")
 
             # Process the response - handle tool calls in a loop
             max_iterations = 5
@@ -622,7 +621,6 @@ class AIAssistant:
 
                 # Check if there are tool calls to process
                 output = data.get("output", [])
-                logger.debug(f"Processing output type={type(output)}: {output}")
 
                 # Handle different response formats
                 if isinstance(output, str):
