@@ -27,6 +27,10 @@ class Settings:
         self.TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
         self.TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
 
+        # OpenAI settings (for AI-powered assistant)
+        self.OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+        self.OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+
         # Notification settings
         self.MIN_PRIORITY: AlertPriority = AlertPriority(
             os.getenv("MIN_PRIORITY", "medium").lower()
@@ -37,6 +41,16 @@ class Settings:
         # Scheduler settings
         self.CHECK_INTERVAL_MINUTES: int = int(
             os.getenv("CHECK_INTERVAL_MINUTES", "60")
+        )
+
+        # Daily digest settings
+        self.DAILY_DIGEST_ENABLED: bool = (
+            os.getenv("DAILY_DIGEST_ENABLED", "true").lower() == "true"
+        )
+        self.DAILY_DIGEST_HOUR: int = int(os.getenv("DAILY_DIGEST_HOUR", "8"))  # 8 AM
+        self.DAILY_DIGEST_MINUTE: int = int(os.getenv("DAILY_DIGEST_MINUTE", "0"))
+        self.DAILY_DIGEST_TIMEZONE: str = os.getenv(
+            "DAILY_DIGEST_TIMEZONE", "America/New_York"
         )
 
         # Data settings
@@ -64,6 +78,10 @@ class Settings:
         return all(
             [self.TWILIO_ACCOUNT_SID, self.TWILIO_AUTH_TOKEN, self.TWILIO_PHONE_NUMBER]
         )
+
+    def is_openai_configured(self) -> bool:
+        """Check if OpenAI API key is configured."""
+        return bool(self.OPENAI_API_KEY)
 
 
 # Singleton instance

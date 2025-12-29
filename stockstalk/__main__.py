@@ -123,9 +123,84 @@ async def run_analysis_async(dry_run: bool = False) -> None:
         logger.error(f"Error during analysis run: {e}", exc_info=True)
 
 
+async def send_daily_digest_to_all_users() -> None:
+    """
+    Send AI-powered daily digest to all users with watchlists.
+
+    This runs as a cron job at the configured time each day.
+    """
+    from stockstalk.services.ai_assistant import AIAssistant
+    from stockstalk.services.notifier import NotificationService
+    from stockstalk.storage import get_database
+
+    logger.info("=" * 60)
+    logger.info("Starting daily digest generation")
+    logger.info("=" * 60)
+
+    try:
+        db = get_database()
+        ai_assistant = AIAssistant()
+        notifier = NotificationService()
+
+        # Get all phone numbers with watchlists
+        all_phones = await db.get_phone_numbers(enabled_only=True)
+
+        if not all_phones:
+            logger.info("No users to send daily digest to")
+            return
+
+        for phone_record in all_phones:
+            phone_number = phone_record.phone_number
+            try:
+                # Get user's watchlist
+                user_watchlist = await db.get_user_watchlist(phone_number)
+
+                if not user_watchlist:
+                    logger.debug(f"Skipping {phone_number} - empty watchlist")
+                    continue
+
+                logger.info(
+                    f"Generating digest for {phone_number} "
+                    f"({len(user_watchlist)} stocks)"
+                )
+
+                # Generate personalized digest
+                digest = await ai_assistant.generate_daily_digest(
+                    user_watchlist,
+                    include_discoveries=True,
+                    max_discoveries=2,
+                )
+
+                # Format and send SMS
+                message = ai_assistant.format_digest_sms(digest)
+
+                # Truncate if too long for SMS (160 chars per segment, max ~3 segments)
+                if len(message) > 450:
+                    message = message[:447] + "..."
+
+                success = await notifier.send_sms(phone_number, message)
+
+                if success:
+                    logger.info(f"Daily digest sent to {phone_number}")
+                else:
+                    logger.error(f"Failed to send digest to {phone_number}")
+
+            except Exception as e:
+                logger.error(f"Error generating digest for {phone_number}: {e}")
+                continue
+
+        logger.info("=" * 60)
+        logger.info("Daily digest generation completed")
+        logger.info("=" * 60)
+
+    except Exception as e:
+        logger.error(f"Error in daily digest job: {e}", exc_info=True)
+
+
 async def run_scheduler_async() -> None:
-    """Run the async scheduler for periodic stock analysis."""
+    """Run the async scheduler for periodic stock analysis and daily digests."""
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
 
     from stockstalk.settings import settings
@@ -144,7 +219,7 @@ async def run_scheduler_async() -> None:
         """Run a scheduled analysis."""
         await run_analysis_async()
 
-    # Add job
+    # Add periodic analysis job
     scheduler.add_job(
         scheduled_analysis,
         IntervalTrigger(minutes=interval_minutes),
@@ -152,6 +227,27 @@ async def run_scheduler_async() -> None:
         name="Stock Analysis",
         max_instances=1,
     )
+
+    # Add daily digest job (runs at configured time)
+    if settings.DAILY_DIGEST_ENABLED:
+        logger.info(
+            f"Daily digest enabled at {settings.DAILY_DIGEST_HOUR:02d}:"
+            f"{settings.DAILY_DIGEST_MINUTE:02d} {settings.DAILY_DIGEST_TIMEZONE}"
+        )
+
+        scheduler.add_job(
+            send_daily_digest_to_all_users,
+            CronTrigger(
+                hour=settings.DAILY_DIGEST_HOUR,
+                minute=settings.DAILY_DIGEST_MINUTE,
+                timezone=settings.DAILY_DIGEST_TIMEZONE,
+            ),
+            id="daily_digest",
+            name="Daily Digest",
+            max_instances=1,
+        )
+    else:
+        logger.info("Daily digest disabled (set DAILY_DIGEST_ENABLED=true to enable)")
 
     # Start scheduler
     scheduler.start()
@@ -196,11 +292,82 @@ def run_server() -> None:
     uvicorn.run(app, host=settings.HOST, port=settings.PORT)
 
 
+async def run_digest_async(phone_number: str | None = None) -> None:
+    """
+    Run daily digest manually for testing.
+
+    Args:
+        phone_number: Optional specific phone number. If None, sends to all users.
+    """
+    from stockstalk.services.ai_assistant import AIAssistant
+    from stockstalk.services.notifier import NotificationService
+    from stockstalk.settings import settings
+    from stockstalk.storage import get_database, init_database
+
+    logger.info("=" * 60)
+    logger.info("Running manual daily digest")
+    logger.info("=" * 60)
+
+    await init_database(settings.DATABASE_URL)
+    db = get_database()
+    ai_assistant = AIAssistant()
+    notifier = NotificationService()
+
+    if phone_number:
+        # Send to specific user
+        phone_numbers = [phone_number]
+    else:
+        # Send to all enabled users
+        all_phones = await db.get_phone_numbers(enabled_only=True)
+        phone_numbers = [p.phone_number for p in all_phones]
+
+    if not phone_numbers:
+        logger.warning("No phone numbers to send digest to")
+        return
+
+    for phone in phone_numbers:
+        try:
+            user_watchlist = await db.get_user_watchlist(phone)
+
+            if not user_watchlist:
+                logger.info(f"Skipping {phone} - empty watchlist")
+                continue
+
+            logger.info(f"Generating digest for {phone} ({len(user_watchlist)} stocks)")
+
+            digest = await ai_assistant.generate_daily_digest(
+                user_watchlist,
+                include_discoveries=True,
+                max_discoveries=3,
+            )
+
+            message = ai_assistant.format_digest_sms(digest)
+
+            print("\n" + "=" * 60)
+            print(f"DIGEST FOR {phone}:")
+            print("=" * 60)
+            print(message)
+            print("=" * 60)
+
+            # Actually send unless it's a dry run (no phone specified = test mode)
+            if phone_number:
+                success = await notifier.send_sms(phone, message)
+                if success:
+                    logger.info(f"Digest sent to {phone}")
+                else:
+                    logger.error(f"Failed to send to {phone}")
+
+        except Exception as e:
+            logger.error(f"Error with {phone}: {e}", exc_info=True)
+
+
 def main() -> None:
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="StockStalk - Async Stock Monitoring App")
+    parser = argparse.ArgumentParser(
+        description="StockStalk - Async Stock Monitoring App"
+    )
     parser.add_argument(
         "--server",
         action="store_true",
@@ -215,6 +382,16 @@ def main() -> None:
         "--dry-run",
         action="store_true",
         help="Analyze stocks but don't send SMS (shows what would be sent)",
+    )
+    parser.add_argument(
+        "--digest",
+        action="store_true",
+        help="Generate and send daily digest to all users (or use --phone for specific user)",
+    )
+    parser.add_argument(
+        "--phone",
+        type=str,
+        help="Phone number to send digest to (use with --digest)",
     )
     parser.add_argument(
         "--host",
@@ -240,6 +417,10 @@ def main() -> None:
     if args.server:
         # Run API server
         run_server()
+
+    elif args.digest:
+        # Run daily digest manually
+        asyncio.run(run_digest_async(phone_number=args.phone))
 
     elif args.once or args.dry_run:
         # Run analysis once (with optional dry-run mode)
