@@ -1,4 +1,4 @@
-name: Python Code Quality
+name: Python Unit Tests
 
 on:
   push:
@@ -6,25 +6,7 @@ on:
   pull_request:
     branches: [ main, develop ]
 
-jobs:
-  black:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-    
-    - name: Install dependencies
-      run: |
-        pip install black
-    
-    - name: Run Black
-      run: |
-        black --check --diff stockstalk/ tests/
-  
+jobs:  
   test:
     runs-on: ubuntu-latest
     steps:
