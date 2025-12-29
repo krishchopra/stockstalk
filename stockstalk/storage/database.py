@@ -69,7 +69,9 @@ class Database:
         """
         self.database_url = database_url
         self.engine = create_async_engine(database_url, echo=False)
-        self.async_session = async_sessionmaker(self.engine, class_=AsyncSession, expire_on_commit=False)
+        self.async_session = async_sessionmaker(
+            self.engine, class_=AsyncSession, expire_on_commit=False
+        )
 
     async def init(self) -> None:
         """Initialize database tables."""
@@ -175,7 +177,9 @@ class Database:
             return False
 
     # Phone number methods
-    async def add_phone_number(self, phone_number: str, label: str | None = None) -> PhoneNumberRecord:
+    async def add_phone_number(
+        self, phone_number: str, label: str | None = None
+    ) -> PhoneNumberRecord:
         """Add a phone number for notifications."""
         async with self.async_session() as session:
             record = PhoneNumberRecord(
@@ -228,4 +232,3 @@ def get_database() -> Database:
     if _database is None:
         raise RuntimeError("Database not initialized. Call init_database() first.")
     return _database
-

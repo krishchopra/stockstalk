@@ -95,8 +95,9 @@ def test_notification_config_defaults() -> None:
     config = NotificationConfig()
 
     assert config.phone_numbers == []
-    assert config.beeper_webhook_url is None
     assert config.min_priority == AlertPriority.MEDIUM
+    assert config.cooldown_minutes == 60
+    assert config.max_alerts_per_hour == 20
 
 
 def test_app_config_creation() -> None:

@@ -1,15 +1,16 @@
-# StockStalk 📈
+# StockStalk
 
-A powerful, extensible stock monitoring application that watches stocks and sends real-time notifications via Beeper when indicators signal potential buy opportunities.
+A powerful, extensible stock monitoring application that watches stocks and sends real-time SMS notifications when indicators signal potential opportunities.
 
 ## Features
 
-- **Multiple Technical Indicators**: RSI, MACD, Moving Average Crossover, Volume Spike Detection, and Price Change alerts
+- **Technical Indicators**: RSI, MACD, Moving Average Crossover, Volume Spike Detection, and Price Change alerts
+- **Fundamental Indicators**: PEG Ratio, Debt-to-Equity, Operating Margins, ROIC, Free Cash Flow, Revenue Growth, Earnings Growth, and Fundamental Score
 - **Extensible Architecture**: Easily add custom indicators
-- **Real-time Notifications**: Beeper webhook integration for instant alerts
-- **SMS Support**: Text-based interface for receiving stock updates on the go
+- **SMS Notifications**: AWS SNS integration for instant alerts with rate limiting and cooldowns
 - **Terminal Configuration UI**: Easy setup and management of watchlists
-- **REST API**: Query stock analysis via HTTP endpoints
+- **REST API**: Query stock analysis via HTTP endpoints (FastAPI)
+- **Async Architecture**: Built with async/await for efficient concurrent operations
 - **Strongly Typed**: Built with Pydantic for robust data validation
 - **Docker Ready**: Simple deployment with Docker and Docker Compose
 - **Scheduled Monitoring**: Automated checks at configurable intervals
@@ -19,7 +20,9 @@ A powerful, extensible stock monitoring application that watches stocks and send
 - **Python 3.11+**: Modern Python with type hints
 - **Pydantic**: Data validation and settings management
 - **yfinance**: Real-time stock data from Yahoo Finance
-- **Flask**: REST API server
+- **FastAPI**: Async REST API server
+- **AWS SNS**: SMS notifications via Amazon Simple Notification Service
+- **SQLAlchemy + aiosqlite**: Async database for alert tracking
 - **NumPy & Pandas**: Numerical analysis
 - **UV**: Fast Python package manager
 - **Docker**: Containerized deployment
@@ -36,7 +39,9 @@ pip install uv
 git clone https://github.com/krishchopra/stockstalk.git
 cd stockstalk
 
-# Install dependencies
+# Create virtual environment and install dependencies
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 uv pip install -e .
 
 # For development (includes pytest, black, mypy)
@@ -55,30 +60,65 @@ docker-compose up -d
 
 ## Quick Start
 
-### 1. Configure the Application
+### 1. Set Up AWS Credentials
 
-Run the interactive configuration UI:
+Create a `.env` file from the example:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your AWS credentials:
+
+```bash
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_REGION=us-east-1
+```
+
+> **Note**: Your AWS account needs SNS permissions to send SMS messages. See [AWS SNS SMS documentation](https://docs.aws.amazon.com/sns/latest/dg/sns-mobile-phone-number-as-subscriber.html).
+
+### 2. Create Your Configuration
+
+Copy the example config and customize your watchlist:
+
+```bash
+cp config.example.json config.json
+```
+
+Edit `config.json` to add your stocks and phone numbers:
+
+```json
+{
+  "watchlist": [
+    {
+      "symbol": "AAPL",
+      "enabled_indicators": ["RSI", "MACD", "Fundamental_Score"],
+      "custom_params": {
+        "RSI": { "period": 14, "oversold_threshold": 30 }
+      }
+    }
+  ],
+  "notification_config": {
+    "phone_numbers": ["+14155551234"],
+    "min_priority": "medium",
+    "cooldown_minutes": 60,
+    "max_alerts_per_hour": 20
+  },
+  "check_interval_minutes": 15,
+  "data_lookback_days": 30
+}
+```
+
+### 3. Run the Interactive Configuration (Optional)
+
+Run the interactive configuration UI to set up your watchlist:
 
 ```bash
 python -m stockstalk --configure
 ```
 
-This will guide you through:
-- Adding stocks to your watchlist
-- Selecting indicators for each stock
-- Setting up notification preferences
-- Configuring check intervals
-
-### 2. Set Environment Variables
-
-Create a `.env` file (see `.env.example`):
-
-```bash
-BEEPER_WEBHOOK_URL=https://your-beeper-webhook-url
-PHONE_NUMBERS=+1234567890,+0987654321
-```
-
-### 3. Run the Monitoring Service
+### 4. Run the Monitoring Service
 
 ```bash
 # Run continuous monitoring (default)
@@ -88,41 +128,99 @@ python -m stockstalk
 python -m stockstalk --once
 
 # Run the API server
-python -m stockstalk --server --port 5000
+python -m stockstalk --server --port 8000
 ```
 
 ## Available Indicators
 
-### 1. **RSI (Relative Strength Index)**
+### Technical Indicators
+
+#### 1. **RSI (Relative Strength Index)**
+
 - Identifies overbought (>70) and oversold (<30) conditions
 - **Buy Signal**: RSI < 30 (oversold)
 - **Parameters**: `period` (default: 14), `oversold_threshold` (default: 30)
 
-### 2. **Moving Average Crossover**
+#### 2. **Moving Average Crossover**
+
 - Detects golden cross (bullish) and death cross (bearish)
 - **Buy Signal**: Short-term MA crosses above long-term MA
 - **Parameters**: `short_period` (default: 10), `long_period` (default: 50)
 
-### 3. **MACD (Moving Average Convergence Divergence)**
+#### 3. **MACD (Moving Average Convergence Divergence)**
+
 - Shows momentum and trend direction
 - **Buy Signal**: MACD crosses above signal line
 - **Parameters**: `fast_period` (default: 12), `slow_period` (default: 26), `signal_period` (default: 9)
 
-### 4. **Volume Spike Detection**
+#### 4. **Volume Spike Detection**
+
 - Identifies unusual trading volume
 - **Buy Signal**: Volume >2x average with price increase
 - **Parameters**: `lookback_period` (default: 20), `spike_threshold` (default: 2.0)
 
-### 5. **Price Change Percentage**
+#### 5. **Price Change Percentage**
+
 - Detects significant price movements
 - **Buy Signal**: Price drops ≥5% (potential dip buy)
 - **Parameters**: `significant_drop_pct` (default: -5.0), `significant_gain_pct` (default: 5.0)
+
+### Fundamental Indicators
+
+#### 6. **PEG Ratio**
+
+- Price/Earnings to Growth ratio
+- **Buy Signal**: PEG < 1.5 (undervalued relative to growth)
+- **Parameters**: `threshold` (default: 1.5)
+
+#### 7. **Debt-to-Equity Ratio**
+
+- Measures financial leverage
+- **Buy Signal**: D/E < 0.5 (low debt, strong balance sheet)
+- **Parameters**: `threshold` (default: 0.5)
+
+#### 8. **Operating Margins**
+
+- Measures operational efficiency
+- **Buy Signal**: Margins > 15%
+- **Parameters**: `min_margin` (default: 0.15)
+
+#### 9. **ROIC (Return on Invested Capital)**
+
+- Measures how well a company uses capital
+- **Buy Signal**: ROIC > 15%
+- **Parameters**: `threshold` (default: 0.15)
+
+#### 10. **Free Cash Flow**
+
+- Measures cash generation capability
+- **Buy Signal**: Positive FCF with good yield
+- **Parameters**: `min_fcf_yield` (default: 0.03)
+
+#### 11. **Revenue Growth**
+
+- Year-over-year revenue growth
+- **Buy Signal**: Growth > 10%
+- **Parameters**: `threshold` (default: 0.10)
+
+#### 12. **Earnings Growth**
+
+- EPS growth rate
+- **Buy Signal**: Growth > 10%
+- **Parameters**: `threshold` (default: 0.10)
+
+#### 13. **Fundamental Score**
+
+- Composite score from multiple fundamental metrics
+- **Buy Signal**: Score ≥ 5 out of 8 checks passing
+- **Parameters**: `min_score` (default: 5)
 
 ## Usage Examples
 
 ### Python API
 
 ```python
+import asyncio
 from stockstalk.services import StockDataFetcher, StockAnalyzer, NotificationService
 from stockstalk.models import WatchlistItem, NotificationConfig
 from stockstalk.utils import ConfigManager
@@ -134,41 +232,43 @@ config = config_manager.load_config()
 # Initialize services
 data_fetcher = StockDataFetcher()
 notifier = NotificationService(config.notification_config)
-analyzer = StockAnalyzer(data_fetcher, notifier, lookback_days=30)
+analyzer = StockAnalyzer(
+    data_fetcher,
+    notifier,
+    config.notification_config,
+    lookback_days=30
+)
 
 # Analyze a stock
-watchlist_item = WatchlistItem(
-    symbol="AAPL",
-    enabled_indicators=["RSI", "MACD", "Volume_Spike"]
-)
-results = analyzer.analyze_stock(watchlist_item)
+async def analyze():
+    watchlist_item = WatchlistItem(
+        symbol="AAPL",
+        enabled_indicators=["RSI", "MACD", "Fundamental_Score"]
+    )
+    results = await analyzer.analyze_stock(watchlist_item)
 
-for result in results:
-    if result.is_triggered:
-        print(f"{result.message}")
+    for result in results:
+        if result.is_triggered:
+            print(f"{result.message}")
+
+asyncio.run(analyze())
 ```
 
 ### REST API Endpoints
 
 ```bash
 # Health check
-curl http://localhost:5000/health
+curl http://localhost:8000/health
 
 # Get stock analysis
-curl http://localhost:5000/api/stock/AAPL
+curl http://localhost:8000/api/stock/AAPL
 
 # View watchlist
-curl http://localhost:5000/api/watchlist
+curl http://localhost:8000/api/watchlist
+
+# List available indicators
+curl http://localhost:8000/api/indicators
 ```
-
-### SMS Commands
-
-Text these commands to your configured Twilio number:
-
-- `HELP` - Show available commands
-- `QUOTE AAPL` - Get current price for AAPL
-- `WATCHLIST` - View your watchlist
-- `ANALYZE AAPL` - Run full analysis on AAPL
 
 ## Configuration
 
@@ -179,21 +279,32 @@ Text these commands to your configured Twilio number:
   "watchlist": [
     {
       "symbol": "AAPL",
-      "enabled_indicators": ["RSI", "MACD", "Volume_Spike"],
+      "enabled_indicators": ["RSI", "MACD", "Fundamental_Score"],
       "custom_params": {
-        "RSI": {"period": 14, "oversold_threshold": 30}
+        "RSI": { "period": 14, "oversold_threshold": 30 },
+        "Fundamental_Score": { "min_score": 5 }
       }
     }
   ],
   "notification_config": {
-    "beeper_webhook_url": "https://...",
-    "phone_numbers": ["+1234567890"],
-    "min_priority": "medium"
+    "phone_numbers": ["+14155551234"],
+    "min_priority": "medium",
+    "cooldown_minutes": 60,
+    "max_alerts_per_hour": 20
   },
   "check_interval_minutes": 15,
   "data_lookback_days": 30
 }
 ```
+
+### Notification Configuration
+
+| Field                 | Description                                                  | Default  |
+| --------------------- | ------------------------------------------------------------ | -------- |
+| `phone_numbers`       | List of E.164 format phone numbers                           | `[]`     |
+| `min_priority`        | Minimum alert priority (`low`, `medium`, `high`, `critical`) | `medium` |
+| `cooldown_minutes`    | Minutes between alerts for same symbol/indicator             | `60`     |
+| `max_alerts_per_hour` | Rate limit for total alerts per hour                         | `20`     |
 
 ## Adding Custom Indicators
 
@@ -207,11 +318,11 @@ class MyCustomIndicator(BaseIndicator):
     @property
     def name(self) -> str:
         return "My_Custom_Indicator"
-    
+
     def analyze(self, current_data: StockData, historical_data: HistoricalData) -> IndicatorResult:
         # Your analysis logic here
         is_triggered = False  # Your condition
-        
+
         return IndicatorResult(
             indicator_name=self.name,
             symbol=current_data.symbol,
@@ -238,13 +349,17 @@ docker build -t stockstalk .
 # Run monitoring service
 docker run -d \
   -v $(pwd)/config.json:/app/config.json \
-  -e BEEPER_WEBHOOK_URL="https://..." \
+  -e AWS_ACCESS_KEY_ID="your_key" \
+  -e AWS_SECRET_ACCESS_KEY="your_secret" \
+  -e AWS_REGION="us-east-1" \
   stockstalk
 
 # Run API server
 docker run -d \
-  -p 5000:5000 \
+  -p 8000:8000 \
   -v $(pwd)/config.json:/app/config.json \
+  -e AWS_ACCESS_KEY_ID="your_key" \
+  -e AWS_SECRET_ACCESS_KEY="your_secret" \
   stockstalk python -m stockstalk --server
 ```
 
@@ -300,19 +415,22 @@ stockstalk/
 │   ├── __init__.py
 │   ├── __main__.py          # Entry point
 │   ├── models/              # Pydantic models
-│   ├── indicators/          # Technical indicators
+│   ├── indicators/          # Stock indicators
 │   │   ├── base.py
 │   │   ├── rsi.py
 │   │   ├── macd.py
 │   │   ├── moving_average.py
 │   │   ├── volume_spike.py
-│   │   └── price_change.py
+│   │   ├── price_change.py
+│   │   └── fundamentals.py  # All fundamental indicators
 │   ├── services/            # Business logic
 │   │   ├── data_fetcher.py
 │   │   ├── analyzer.py
-│   │   └── notifier.py
+│   │   └── notifier.py      # AWS SNS integration
+│   ├── storage/             # Database layer
+│   │   └── database.py      # SQLAlchemy async models
 │   ├── api/                 # REST API
-│   │   └── server.py
+│   │   └── server.py        # FastAPI server
 │   └── utils/               # Utilities
 │       ├── config.py
 │       └── terminal_ui.py
@@ -321,6 +439,8 @@ stockstalk/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── pyproject.toml
+├── config.example.json      # Example configuration
+├── .env.example             # Example environment variables
 └── README.md
 ```
 
@@ -329,20 +449,26 @@ stockstalk/
 1. **Create a Droplet** with Ubuntu 22.04
 
 2. **Install Docker**:
+
    ```bash
    curl -fsSL https://get.docker.com -o get-docker.sh
    sh get-docker.sh
    ```
 
 3. **Clone and Deploy**:
+
    ```bash
    git clone https://github.com/krishchopra/stockstalk.git
    cd stockstalk
-   
+
    # Set environment variables
    cp .env.example .env
-   nano .env  # Edit with your values
-   
+   nano .env  # Add your AWS credentials
+
+   # Create your config
+   cp config.example.json config.json
+   nano config.json  # Add your watchlist and phone numbers
+
    # Deploy with docker-compose
    docker-compose up -d
    ```
@@ -362,7 +488,7 @@ If not using Docker, set up a cron job:
 crontab -e
 
 # Run every 15 minutes
-*/15 * * * * cd /path/to/stockstalk && python -m stockstalk --once >> /var/log/stockstalk.log 2>&1
+*/15 * * * * cd /path/to/stockstalk && source .venv/bin/activate && python -m stockstalk --once >> /var/log/stockstalk.log 2>&1
 ```
 
 ## Troubleshooting
@@ -370,19 +496,29 @@ crontab -e
 ### Common Issues
 
 1. **"No module named 'stockstalk'"**
+
    - Ensure you've installed the package: `uv pip install -e .`
 
 2. **Yahoo Finance API errors**
+
    - Yahoo Finance may rate-limit requests
    - Try increasing `check_interval_minutes`
 
-3. **Notification not sending**
-   - Verify `BEEPER_WEBHOOK_URL` is correct
-   - Check logs for API errors
+3. **SMS notifications not sending**
+
+   - Verify AWS credentials are correct in `.env`
+   - Check that your AWS account has SNS SMS permissions
+   - Verify phone numbers are in E.164 format (e.g., `+14155551234`)
+   - Check logs for AWS API errors
 
 4. **Docker container exits immediately**
+
    - Check logs: `docker logs stockstalk`
-   - Ensure config.json exists
+   - Ensure `config.json` exists and is valid JSON
+
+5. **"Database not initialized" error**
+   - The database is auto-initialized on first run
+   - Check write permissions in the app directory
 
 ## Contributing
 

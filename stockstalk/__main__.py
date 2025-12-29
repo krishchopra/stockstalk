@@ -74,7 +74,9 @@ async def run_analysis_async(config_path: Path) -> None:
         # Log summary
         for symbol, indicator_results in results.items():
             triggered_count = sum(1 for r in indicator_results if r.is_triggered)
-            logger.info(f"{symbol}: {triggered_count}/{len(indicator_results)} indicators triggered")
+            logger.info(
+                f"{symbol}: {triggered_count}/{len(indicator_results)} indicators triggered"
+            )
 
         logger.info("=" * 60)
         logger.info("Analysis run completed")

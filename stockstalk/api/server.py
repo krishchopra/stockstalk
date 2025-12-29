@@ -124,9 +124,7 @@ async def get_stock_analysis(symbol: str) -> StockAnalysisResponse:
         )
 
         # Fetch stock data
-        current_data, historical_data = await data_fetcher.get_stock_data(
-            symbol.upper(), days=30
-        )
+        current_data, historical_data = await data_fetcher.get_stock_data(symbol.upper(), days=30)
 
         # Run indicators (without sending notifications for API requests)
         results = []
@@ -228,10 +226,13 @@ async def get_watchlist() -> WatchlistResponse:
                 if any(w.symbol == item.symbol for w in watchlist):
                     continue
                 import json
+
                 watchlist.append(
                     WatchlistItemResponse(
                         symbol=item.symbol,
-                        indicators=json.loads(item.enabled_indicators) if item.enabled_indicators else [],
+                        indicators=(
+                            json.loads(item.enabled_indicators) if item.enabled_indicators else []
+                        ),
                         custom_params=json.loads(item.custom_params) if item.custom_params else {},
                     )
                 )

@@ -126,9 +126,7 @@ class StockDataFetcher:
         except Exception as e:
             raise ValueError(f"Failed to fetch historical data for {symbol}: {str(e)}") from e
 
-    async def get_stock_data(
-        self, symbol: str, days: int = 30
-    ) -> tuple[StockData, HistoricalData]:
+    async def get_stock_data(self, symbol: str, days: int = 30) -> tuple[StockData, HistoricalData]:
         """
         Fetch both current and historical data for a symbol.
 
@@ -143,8 +141,6 @@ class StockDataFetcher:
         current_task = self.get_current_data(symbol)
         historical_task = self.get_historical_data(symbol, days)
 
-        current_data, historical_data = await asyncio.gather(
-            current_task, historical_task
-        )
+        current_data, historical_data = await asyncio.gather(current_task, historical_task)
 
         return current_data, historical_data

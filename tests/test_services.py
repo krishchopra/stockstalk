@@ -1,6 +1,5 @@
 """Tests for services."""
 
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -8,7 +7,6 @@ from stockstalk.models import (
     AlertPriority,
     IndicatorResult,
     NotificationConfig,
-    WatchlistItem,
 )
 from stockstalk.services.analyzer import IndicatorRegistry, StockAnalyzer
 from stockstalk.services.notifier import NotificationService
@@ -78,13 +76,10 @@ def test_notification_service_not_triggered() -> None:
     assert service.should_notify(result) is False
 
 
-@patch("stockstalk.services.notifier.requests.post")
-def test_notification_service_send_notification(mock_post: MagicMock) -> None:
-    """Test sending notification via Beeper."""
-    mock_post.return_value.status_code = 200
-
+def test_notification_service_format_message() -> None:
+    """Test message formatting for notifications."""
     config = NotificationConfig(
-        beeper_webhook_url="https://example.com/webhook",
+        phone_numbers=["+14155551234"],
         min_priority=AlertPriority.MEDIUM,
     )
     service = NotificationService(config)
@@ -98,10 +93,11 @@ def test_notification_service_send_notification(mock_post: MagicMock) -> None:
         message="Test message",
     )
 
-    success = service.send_notification(result)
+    formatted = service._format_message(result)
 
-    assert success is True
-    mock_post.assert_called_once()
+    assert "AAPL" in formatted
+    assert "Test message" in formatted
+    assert "🔔" in formatted  # HIGH priority emoji
 
 
 def test_stock_analyzer_initialization() -> None:
@@ -109,9 +105,13 @@ def test_stock_analyzer_initialization() -> None:
     from stockstalk.services.data_fetcher import StockDataFetcher
 
     data_fetcher = StockDataFetcher()
-    notifier = NotificationService(NotificationConfig())
-    analyzer = StockAnalyzer(data_fetcher, notifier, lookback_days=30)
+    notification_config = NotificationConfig()
+    notifier = NotificationService(notification_config)
+    analyzer = StockAnalyzer(
+        data_fetcher, notifier, notification_config, lookback_days=30
+    )
 
     assert analyzer.lookback_days == 30
     assert analyzer.data_fetcher is data_fetcher
     assert analyzer.notifier is notifier
+    assert analyzer.notification_config is notification_config

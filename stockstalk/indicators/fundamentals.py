@@ -96,10 +96,12 @@ class PEGRatioIndicator(BaseIndicator):
             )
 
         is_triggered = peg < threshold and peg > 0
-        
+
         if peg < 1.0:
             priority = AlertPriority.HIGH
-            message = f"{current_data.symbol} PEG={peg:.2f} - Potentially undervalued with strong growth"
+            message = (
+                f"{current_data.symbol} PEG={peg:.2f} - Potentially undervalued with strong growth"
+            )
         elif peg < threshold:
             priority = AlertPriority.MEDIUM
             message = f"{current_data.symbol} PEG={peg:.2f} - Fairly valued with growth potential"
@@ -157,7 +159,9 @@ class DebtToEquityIndicator(BaseIndicator):
 
         if de_ratio < 0.3:
             priority = AlertPriority.HIGH
-            message = f"{current_data.symbol} D/E={de_ratio:.2f} - Very low debt, strong balance sheet"
+            message = (
+                f"{current_data.symbol} D/E={de_ratio:.2f} - Very low debt, strong balance sheet"
+            )
         elif de_ratio < threshold:
             priority = AlertPriority.MEDIUM
             message = f"{current_data.symbol} D/E={de_ratio:.2f} - Healthy debt levels"
@@ -247,7 +251,7 @@ class ROICIndicator(BaseIndicator):
         threshold = self.get_param("threshold", 0.15)  # 15%
 
         fundamentals = FundamentalAnalyzer.get_fundamentals(current_data.symbol)
-        
+
         # Try ROE as proxy (ROIC often not directly available)
         roe = fundamentals.get("return_on_equity")
         roa = fundamentals.get("return_on_assets")
@@ -329,12 +333,16 @@ class FreeCashFlowIndicator(BaseIndicator):
         elif fcf > 0:
             priority = AlertPriority.MEDIUM
             yield_str = f", Yield {fcf_yield*100:.1f}%" if fcf_yield else ""
-            message = f"{current_data.symbol} FCF ${fcf_billions:.2f}B{yield_str} - Positive cash flow"
+            message = (
+                f"{current_data.symbol} FCF ${fcf_billions:.2f}B{yield_str} - Positive cash flow"
+            )
         else:
             priority = AlertPriority.LOW
             message = f"{current_data.symbol} FCF ${fcf_billions:.2f}B - Negative free cash flow"
 
-        signal_strength = min(1, fcf_yield * 10) if fcf_yield and fcf_yield > 0 else (0.5 if fcf > 0 else 0)
+        signal_strength = (
+            min(1, fcf_yield * 10) if fcf_yield and fcf_yield > 0 else (0.5 if fcf > 0 else 0)
+        )
 
         return IndicatorResult(
             indicator_name=self.name,
@@ -432,7 +440,9 @@ class EarningsGrowthIndicator(BaseIndicator):
 
         if earnings_growth >= 0.25:
             priority = AlertPriority.HIGH
-            message = f"{current_data.symbol} EPS growth {growth_pct:.1f}% - Exceptional earnings growth"
+            message = (
+                f"{current_data.symbol} EPS growth {growth_pct:.1f}% - Exceptional earnings growth"
+            )
         elif earnings_growth >= threshold:
             priority = AlertPriority.MEDIUM
             message = f"{current_data.symbol} EPS growth {growth_pct:.1f}% - Strong earnings growth"
@@ -559,4 +569,3 @@ class FundamentalScoreIndicator(BaseIndicator):
                 "failed": failed,
             },
         )
-
