@@ -12,6 +12,8 @@ services:
     env_file:
       - .env
     environment:
+      # Database - persist in mounted volume
+      - DATABASE_URL=sqlite+aiosqlite:///./data/stockstalk.db
       # Twilio credentials
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
@@ -43,6 +45,7 @@ services:
     env_file:
       - .env
     environment:
+      - DATABASE_URL=sqlite+aiosqlite:///./data/stockstalk.db
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
       - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
