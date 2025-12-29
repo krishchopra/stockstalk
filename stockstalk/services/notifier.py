@@ -250,7 +250,7 @@ class NotificationService:
         # Build compact message
         lines = ["stockstalk alerts:"]
 
-        for symbol, symbol_results in by_symbol.items():
+        for symbol, symbol_results in all_results_by_symbol.items():
             # Get highest priority for this symbol
             priorities = [r.priority for r in symbol_results]
             if AlertPriority.CRITICAL in priorities:
@@ -265,6 +265,6 @@ class NotificationService:
             lines.append(f"{prefix}{symbol}: {', '.join(indicators)}")
 
         # Add count summary
-        lines.append(f"total: {len(results)} signals, {len(by_symbol)} stocks")
+        lines.append(f"total: {len(results)} signals, {len(all_results_by_symbol)} stocks")
 
         return "\n".join(lines).lower()
