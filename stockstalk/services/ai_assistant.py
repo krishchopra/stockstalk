@@ -1,6 +1,7 @@
 """AI-powered investment assistant using OpenAI gpt-5-mini with function calling."""
 
 import asyncio
+import html
 import json
 import logging
 import re
@@ -172,13 +173,13 @@ TOOLS = [
     {
         "type": "function",
         "name": "web_search",
-        "description": "Search the web for current news, information, or anything else. Use this when the user asks about recent events, news, or anything you don't have data for.",
+        "description": "Search the web for current news, information, or anything else. Use this when the user asks about recent events, news, or anything you don't have data for. IMPORTANT: For news queries, always include words like 'recent', 'latest', 'today', or 'this week' to get current results.",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The search query (e.g., 'AAPL earnings news', 'tech sector outlook 2024')",
+                    "description": "The search query. For news, include 'recent', 'latest', 'today', or 'this week' (e.g., 'latest AAPL earnings news', 'recent tech sector news today', 'tech news this week')",
                 }
             },
             "required": ["query"],
@@ -512,11 +513,33 @@ class AIAssistant:
         """Search the web using DuckDuckGo."""
         try:
             logger.info(f"Web search query: {query}")
+
+            # Enhance query for recent news if it's a news query
+            query_lower = query.lower()
+            if any(
+                word in query_lower for word in ["news", "article", "report", "update"]
+            ):
+                # Add recency terms if not already present
+                if not any(
+                    word in query_lower
+                    for word in [
+                        "recent",
+                        "latest",
+                        "today",
+                        "this week",
+                        "this month",
+                        "2025",
+                    ]
+                ):
+                    query = f"{query} recent"
+                    logger.info(f"Enhanced query: {query}")
+
             # Use DuckDuckGo's HTML search (no API key needed)
+            # Add time filter parameter for recent results (df=w means "past week")
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.get(
                     "https://html.duckduckgo.com/html/",
-                    params={"q": query},
+                    params={"q": query, "df": "w"},
                     headers={
                         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
                     },
@@ -589,16 +612,18 @@ class AIAssistant:
 
                 if results:
                     # Format results into a readable message
-                    lines = [f"found {len(results)} results for '{query}':"]
+                    lines = []
                     for i, result in enumerate(results, 1):
-                        title = result.get("title", "Result")
-                        snippet = result.get("snippet", "")
+                        title = html.unescape(result.get("title", "Result"))
+                        snippet = html.unescape(result.get("snippet", ""))
                         url = result.get("url", "")
-                        lines.append(f"\n{i}. {title}")
+                        lines.append(f"{i}. {title}")
                         if snippet:
                             lines.append(f"   {snippet}")
                         if url:
                             lines.append(f"   {url}")
+                        if i < len(results):
+                            lines.append("")  # Blank line between results
 
                     return {
                         "message": "\n".join(lines),
