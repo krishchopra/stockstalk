@@ -36,7 +36,9 @@ class ConfigManager:
             FileNotFoundError: If config file doesn't exist
         """
         if not self.config_path.exists():
-            logger.warning(f"Config file {self.config_path} not found. Creating default config.")
+            logger.warning(
+                f"Config file {self.config_path} not found. Creating default config."
+            )
             default_config = self._get_default_config()
             self.save_config(default_config)
             return default_config
@@ -77,25 +79,35 @@ class ConfigManager:
         phone_numbers = os.getenv("PHONE_NUMBERS", "").split(",")
         phone_numbers = [p.strip() for p in phone_numbers if p.strip()]
 
+        # Default indicators - Volume_Spike is critical for catching momentum
+        default_indicators = ["RSI", "MACD", "Volume_Spike", "Price_Change"]
+
         return AppConfig(
             watchlist=[
                 WatchlistItem(
                     symbol="AAPL",
-                    enabled_indicators=[
-                        "RSI",
-                        "MA_Crossover",
-                        "Volume_Spike",
-                        "Price_Change",
-                        "MACD",
-                    ],
+                    enabled_indicators=default_indicators + ["Fundamental_Score"],
                 ),
                 WatchlistItem(
                     symbol="MSFT",
-                    enabled_indicators=["RSI", "MA_Crossover", "MACD"],
+                    enabled_indicators=default_indicators + ["Fundamental_Score"],
                 ),
                 WatchlistItem(
                     symbol="GOOGL",
-                    enabled_indicators=["RSI", "Volume_Spike", "Price_Change"],
+                    enabled_indicators=default_indicators + ["Fundamental_Score"],
+                ),
+                WatchlistItem(
+                    symbol="NVDA",
+                    enabled_indicators=default_indicators + ["Fundamental_Score"],
+                ),
+                WatchlistItem(
+                    symbol="TSLA",
+                    enabled_indicators=default_indicators,
+                    custom_params={
+                        "Volume_Spike": {
+                            "spike_threshold": 2.5
+                        },  # Higher threshold for volatile stock
+                    },
                 ),
             ],
             notification_config=NotificationConfig(

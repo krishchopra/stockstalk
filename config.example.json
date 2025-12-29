@@ -5,6 +5,8 @@
       "enabled_indicators": [
         "RSI",
         "MACD",
+        "Volume_Spike",
+        "Price_Change",
         "Fundamental_Score"
       ],
       "custom_params": {
@@ -12,6 +14,10 @@
           "period": 14,
           "oversold_threshold": 30,
           "overbought_threshold": 70
+        },
+        "Volume_Spike": {
+          "lookback_period": 20,
+          "spike_threshold": 2.0
         },
         "Fundamental_Score": {
           "min_score": 5
@@ -22,10 +28,11 @@
       "symbol": "MSFT",
       "enabled_indicators": [
         "RSI",
+        "MACD",
+        "Volume_Spike",
         "MA_Crossover",
         "PEG_Ratio",
-        "ROIC",
-        "Free_Cash_Flow"
+        "ROIC"
       ],
       "custom_params": {
         "PEG_Ratio": {
@@ -40,6 +47,7 @@
       "symbol": "GOOGL",
       "enabled_indicators": [
         "RSI",
+        "MACD",
         "Volume_Spike",
         "Debt_To_Equity",
         "Operating_Margins",
@@ -62,6 +70,7 @@
       "enabled_indicators": [
         "RSI",
         "MACD",
+        "Volume_Spike",
         "Fundamental_Score",
         "Earnings_Growth"
       ],
@@ -73,12 +82,23 @@
           "threshold": 0.15
         }
       }
+    },
+    {
+      "symbol": "TSLA",
+      "enabled_indicators": ["RSI", "MACD", "Volume_Spike", "Price_Change"],
+      "custom_params": {
+        "Volume_Spike": {
+          "spike_threshold": 2.5
+        },
+        "Price_Change": {
+          "significant_drop_pct": -7.0,
+          "significant_gain_pct": 7.0
+        }
+      }
     }
   ],
   "notification_config": {
-    "phone_numbers": [
-      "+1234567890"
-    ],
+    "phone_numbers": ["+1234567890"],
     "min_priority": "medium",
     "cooldown_minutes": 60,
     "max_alerts_per_hour": 20

@@ -96,9 +96,6 @@ async def run_scheduler_async(config_path: Path) -> None:
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.interval import IntervalTrigger
 
-    from stockstalk.services.analyzer import StockAnalyzer
-    from stockstalk.services.data_fetcher import StockDataFetcher
-    from stockstalk.services.notifier import NotificationService
     from stockstalk.storage import init_database
     from stockstalk.utils.config import ConfigManager
 
@@ -182,11 +179,84 @@ def run_server(config_path: Path, host: str, port: int) -> None:
     uvicorn.run(app, host=host, port=port)
 
 
+async def generate_vti_watchlist_async(
+    config_path: Path,
+    top_n: int = 1000,
+    etf_symbol: str = "VTI",
+) -> None:
+    """
+    Generate a watchlist from VTI (or other ETF) top holdings.
+
+    Args:
+        config_path: Path to configuration file
+        top_n: Number of top holdings to include
+        etf_symbol: ETF symbol to fetch holdings from
+    """
+    from stockstalk.services.etf_holdings import ETFHoldingsFetcher
+    from stockstalk.utils.config import ConfigManager
+
+    logger.info(f"Generating watchlist from {etf_symbol} top {top_n} holdings...")
+
+    # Fetch holdings and generate watchlist
+    fetcher = ETFHoldingsFetcher(etf_symbol)
+    watchlist = await fetcher.generate_watchlist(
+        top_n=top_n,
+        include_volume_spike=True,  # Always include volume spike detection
+    )
+
+    # Load existing config to preserve notification settings
+    config_manager = ConfigManager(config_path)
+    try:
+        existing_config = config_manager.load_config()
+        notification_config = existing_config.notification_config
+        check_interval = existing_config.check_interval_minutes
+        lookback_days = existing_config.data_lookback_days
+    except Exception:
+        from stockstalk.models import NotificationConfig
+
+        notification_config = NotificationConfig()
+        check_interval = 60
+        lookback_days = 30
+
+    # Create new config with VTI watchlist
+    from stockstalk.models import AppConfig
+
+    new_config = AppConfig(
+        watchlist=watchlist,
+        notification_config=notification_config,
+        check_interval_minutes=check_interval,
+        data_lookback_days=lookback_days,
+    )
+
+    # Save to config file
+    config_manager.save_config(new_config)
+
+    logger.info(f"✅ Generated watchlist with {len(watchlist)} stocks")
+    logger.info("📊 All stocks have Volume_Spike indicator enabled")
+    logger.info(f"💾 Config saved to {config_path}")
+
+    # Print summary
+    print(f"\n🎯 VTI Top {len(watchlist)} Watchlist Generated!")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f"📈 Stocks added: {len(watchlist)}")
+    print("🔔 Volume Spike detection: ENABLED for all stocks")
+    print(f"📁 Saved to: {config_path}")
+    print("\nTop 20 holdings:")
+    for i, item in enumerate(watchlist[:20], 1):
+        indicators = ", ".join(item.enabled_indicators[:3])
+        if len(item.enabled_indicators) > 3:
+            indicators += f" +{len(item.enabled_indicators) - 3} more"
+        print(f"  {i:2}. {item.symbol:6} → {indicators}")
+    print("\n💡 Run 'python -m stockstalk --once' to analyze all stocks")
+
+
 def main() -> None:
     """Main entry point."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="StockStalk - Async Stock Monitoring App")
+    parser = argparse.ArgumentParser(
+        description="StockStalk - Async Stock Monitoring App"
+    )
     parser.add_argument(
         "--config",
         type=Path,
@@ -209,6 +279,23 @@ def main() -> None:
         help="Run analysis once and exit",
     )
     parser.add_argument(
+        "--generate-vti",
+        action="store_true",
+        help="Generate watchlist from VTI top holdings",
+    )
+    parser.add_argument(
+        "--top-n",
+        type=int,
+        default=1000,
+        help="Number of top holdings to include (default: 1000)",
+    )
+    parser.add_argument(
+        "--etf",
+        type=str,
+        default="VTI",
+        help="ETF symbol to fetch holdings from (default: VTI)",
+    )
+    parser.add_argument(
         "--host",
         type=str,
         default="0.0.0.0",
@@ -223,7 +310,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.configure:
+    if args.generate_vti:
+        # Generate VTI watchlist
+        asyncio.run(generate_vti_watchlist_async(args.config, args.top_n, args.etf))
+
+    elif args.configure:
         # Run configuration UI
         from stockstalk.utils.terminal_ui import TerminalUI
         from stockstalk.utils.config import ConfigManager
