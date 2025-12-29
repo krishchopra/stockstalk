@@ -709,7 +709,7 @@ class AIAssistant:
                 return await self._fallback_response(user_message, user_watchlist)
 
             try:
-                logger.debug(f"Calling OpenAI API with model {self.model}")
+                logger.info(f"Calling OpenAI API with model {self.model}")
                 # Run synchronous OpenAI call in thread pool
                 response = await asyncio.to_thread(
                     self.client.responses.create,
@@ -717,27 +717,35 @@ class AIAssistant:
                     input=input_text,
                     tools=TOOLS,
                 )
-                logger.debug("OpenAI API response received")
+                logger.info("OpenAI API response received")
 
                 # Log response structure for debugging
-                logger.debug(f"Response attributes: {dir(response)}")
+                logger.info(f"Response type: {type(response)}")
+                logger.info(
+                    f"Response attributes: {[attr for attr in dir(response) if not attr.startswith('_')]}"
+                )
                 if hasattr(response, "output"):
-                    logger.debug(
+                    logger.info(
                         f"Response output type: {type(response.output)}, value: {response.output}"
                     )
                 if hasattr(response, "output_text"):
-                    logger.debug(f"Response output_text: {response.output_text}")
+                    logger.info(f"Response output_text: {response.output_text}")
 
-                # Extract response data
-                data = {
-                    "id": response.id if hasattr(response, "id") else None,
-                    "output": response.output if hasattr(response, "output") else [],
-                    "output_text": response.output_text
-                    if hasattr(response, "output_text")
-                    else "",
-                }
-                logger.debug(
-                    f"Extracted data: output type={type(data['output'])}, output_text={data['output_text'][:100] if data['output_text'] else 'empty'}"
+                # Extract response data - try different possible attribute names
+                data = {}
+                if hasattr(response, "id"):
+                    data["id"] = response.id
+                if hasattr(response, "output"):
+                    data["output"] = response.output
+                else:
+                    data["output"] = []
+                if hasattr(response, "output_text"):
+                    data["output_text"] = response.output_text
+                else:
+                    data["output_text"] = ""
+
+                logger.info(
+                    f"Extracted data: output type={type(data.get('output'))}, output={data.get('output')}, output_text={data.get('output_text', '')[:100] if data.get('output_text') else 'empty'}"
                 )
             except Exception as e:
                 logger.error(f"OpenAI API request error: {e}", exc_info=True)
@@ -793,7 +801,9 @@ class AIAssistant:
                     return response_text
 
                 if isinstance(output, list):
-                    logger.debug(f"Processing output list with {len(output)} items")
+                    logger.info(
+                        f"Processing output list with {len(output)} items: {output}"
+                    )
                     tool_calls = [
                         item
                         for item in output
@@ -806,9 +816,13 @@ class AIAssistant:
                         if isinstance(item, dict) and item.get("type") == "message"
                     ]
 
-                    logger.debug(
+                    logger.info(
                         f"Found {len(tool_calls)} tool calls, {len(text_outputs)} text outputs"
                     )
+                    if tool_calls:
+                        logger.info(f"Tool calls: {tool_calls}")
+                    if text_outputs:
+                        logger.info(f"Text outputs: {text_outputs}")
 
                     if not tool_calls:
                         # No more tool calls, return the text
