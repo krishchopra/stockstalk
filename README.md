@@ -4,7 +4,7 @@ A powerful, AI-powered stock monitoring application that watches stocks and send
 
 ## Features
 
-- **🤖 AI-Powered Assistant**: Natural language understanding via GPT-4o-mini - just text your questions!
+- **🤖 AI-Powered Assistant**: Natural language understanding via GPT-5-nano - just text your questions!
 - **📊 Daily Digests**: Automated morning summaries of your watchlist with AI insights
 - **💡 Opportunity Discovery**: Scans VTI holdings to find investment opportunities you might be missing
 - **Technical Indicators**: RSI, MACD, Moving Average Crossover, Volume Spike Detection, and Price Change alerts
