@@ -1,14 +1,15 @@
 """Tests for services."""
 
+import os
+from unittest import mock
+
 import pytest
 
 from stockstalk.models import (
     AlertPriority,
     IndicatorResult,
-    NotificationConfig,
 )
 from stockstalk.services.analyzer import IndicatorRegistry, StockAnalyzer
-from stockstalk.services.notifier import NotificationService
 
 
 def test_indicator_registry_get_indicator() -> None:
@@ -33,35 +34,39 @@ def test_indicator_registry_invalid_indicator() -> None:
 
 def test_notification_service_should_notify() -> None:
     """Test notification priority filtering."""
-    config = NotificationConfig(min_priority=AlertPriority.MEDIUM)
-    service = NotificationService(config)
+    # Set min priority to MEDIUM via environment
+    with mock.patch.dict(os.environ, {"MIN_PRIORITY": "medium"}, clear=False):
+        from stockstalk.services.notifier import NotificationService
 
-    low_result = IndicatorResult(
-        indicator_name="Test",
-        symbol="AAPL",
-        is_triggered=True,
-        priority=AlertPriority.LOW,
-        signal_strength=0.5,
-        message="Test",
-    )
+        service = NotificationService()
 
-    high_result = IndicatorResult(
-        indicator_name="Test",
-        symbol="AAPL",
-        is_triggered=True,
-        priority=AlertPriority.HIGH,
-        signal_strength=0.8,
-        message="Test",
-    )
+        low_result = IndicatorResult(
+            indicator_name="Test",
+            symbol="AAPL",
+            is_triggered=True,
+            priority=AlertPriority.LOW,
+            signal_strength=0.5,
+            message="Test",
+        )
 
-    assert service.should_notify(low_result) is False
-    assert service.should_notify(high_result) is True
+        high_result = IndicatorResult(
+            indicator_name="Test",
+            symbol="AAPL",
+            is_triggered=True,
+            priority=AlertPriority.HIGH,
+            signal_strength=0.8,
+            message="Test",
+        )
+
+        assert service.should_notify(low_result) is False
+        assert service.should_notify(high_result) is True
 
 
 def test_notification_service_not_triggered() -> None:
     """Test that non-triggered results don't notify."""
-    config = NotificationConfig()
-    service = NotificationService(config)
+    from stockstalk.services.notifier import NotificationService
+
+    service = NotificationService()
 
     result = IndicatorResult(
         indicator_name="Test",
@@ -77,11 +82,9 @@ def test_notification_service_not_triggered() -> None:
 
 def test_notification_service_format_message() -> None:
     """Test message formatting for notifications."""
-    config = NotificationConfig(
-        phone_numbers=["+14155551234"],
-        min_priority=AlertPriority.MEDIUM,
-    )
-    service = NotificationService(config)
+    from stockstalk.services.notifier import NotificationService
+
+    service = NotificationService()
 
     result = IndicatorResult(
         indicator_name="Test",
@@ -102,13 +105,12 @@ def test_notification_service_format_message() -> None:
 def test_stock_analyzer_initialization() -> None:
     """Test stock analyzer initialization."""
     from stockstalk.services.data_fetcher import StockDataFetcher
+    from stockstalk.services.notifier import NotificationService
 
     data_fetcher = StockDataFetcher()
-    notification_config = NotificationConfig()
-    notifier = NotificationService(notification_config)
-    analyzer = StockAnalyzer(data_fetcher, notifier, notification_config, lookback_days=30)
+    notifier = NotificationService()
+    analyzer = StockAnalyzer(data_fetcher, notifier, lookback_days=30)
 
     assert analyzer.lookback_days == 30
     assert analyzer.data_fetcher is data_fetcher
     assert analyzer.notifier is notifier
-    assert analyzer.notification_config is notification_config

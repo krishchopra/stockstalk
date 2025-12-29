@@ -20,41 +20,50 @@ class AlertPriority(str, Enum):
 class Settings:
     """Application settings from environment variables."""
 
-    # Twilio settings (required for SMS)
-    TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
-    TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
-    TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
+    def __init__(self) -> None:
+        """Initialize settings from environment variables."""
+        # Twilio settings (required for SMS)
+        self.TWILIO_ACCOUNT_SID: str = os.getenv("TWILIO_ACCOUNT_SID", "")
+        self.TWILIO_AUTH_TOKEN: str = os.getenv("TWILIO_AUTH_TOKEN", "")
+        self.TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
 
-    # Notification settings
-    MIN_PRIORITY: AlertPriority = AlertPriority(os.getenv("MIN_PRIORITY", "medium").lower())
-    COOLDOWN_MINUTES: int = int(os.getenv("COOLDOWN_MINUTES", "60"))
-    MAX_ALERTS_PER_HOUR: int = int(os.getenv("MAX_ALERTS_PER_HOUR", "10"))
+        # Notification settings
+        self.MIN_PRIORITY: AlertPriority = AlertPriority(
+            os.getenv("MIN_PRIORITY", "medium").lower()
+        )
+        self.COOLDOWN_MINUTES: int = int(os.getenv("COOLDOWN_MINUTES", "60"))
+        self.MAX_ALERTS_PER_HOUR: int = int(os.getenv("MAX_ALERTS_PER_HOUR", "10"))
 
-    # Scheduler settings
-    CHECK_INTERVAL_MINUTES: int = int(os.getenv("CHECK_INTERVAL_MINUTES", "60"))
+        # Scheduler settings
+        self.CHECK_INTERVAL_MINUTES: int = int(
+            os.getenv("CHECK_INTERVAL_MINUTES", "60")
+        )
 
-    # Data settings
-    DATA_LOOKBACK_DAYS: int = int(os.getenv("DATA_LOOKBACK_DAYS", "30"))
+        # Data settings
+        self.DATA_LOOKBACK_DAYS: int = int(os.getenv("DATA_LOOKBACK_DAYS", "30"))
 
-    # Database
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./stockstalk.db")
+        # Database
+        self.DATABASE_URL: str = os.getenv(
+            "DATABASE_URL", "sqlite+aiosqlite:///./stockstalk.db"
+        )
 
-    # Server settings
-    HOST: str = os.getenv("HOST", "0.0.0.0")
-    PORT: int = int(os.getenv("PORT", "8000"))
+        # Server settings
+        self.HOST: str = os.getenv("HOST", "0.0.0.0")
+        self.PORT: int = int(os.getenv("PORT", "8000"))
 
-    # Default indicators for new watchlist items
-    DEFAULT_INDICATORS: list[str] = [
-        "RSI",
-        "MACD",
-        "Fundamental_Score",
-        "Volume_Spike",
-    ]
+        # Default indicators for new watchlist items
+        self.DEFAULT_INDICATORS: list[str] = [
+            "RSI",
+            "MACD",
+            "Fundamental_Score",
+            "Volume_Spike",
+        ]
 
-    @classmethod
-    def is_twilio_configured(cls) -> bool:
+    def is_twilio_configured(self) -> bool:
         """Check if Twilio credentials are configured."""
-        return all([cls.TWILIO_ACCOUNT_SID, cls.TWILIO_AUTH_TOKEN, cls.TWILIO_PHONE_NUMBER])
+        return all(
+            [self.TWILIO_ACCOUNT_SID, self.TWILIO_AUTH_TOKEN, self.TWILIO_PHONE_NUMBER]
+        )
 
 
 # Singleton instance
