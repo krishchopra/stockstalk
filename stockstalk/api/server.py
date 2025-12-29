@@ -556,13 +556,23 @@ async def sms_webhook(
         # Route everything through the AI agent
         # The agent will decide what tools to use based on the message
         logger.info(f"Processing with AI agent: {text}")
-        response = await ai_assistant.chat(
-            user_message=text,
-            user_phone=user_phone,
-            user_watchlist=user_watchlist,
-            db=db,
-        )
-        return twiml_response(response)
+        try:
+            response = await ai_assistant.chat(
+                user_message=text,
+                user_phone=user_phone,
+                user_watchlist=user_watchlist,
+                db=db,
+            )
+            if not response or not response.strip():
+                logger.warning("AI assistant returned empty response, using fallback")
+                response = "sorry, i didn't get that. try again?"
+            logger.info(f"AI response: {response[:100]}...")  # Log first 100 chars
+            return twiml_response(response.lower())
+        except Exception as e:
+            logger.error(f"Error in AI chat: {e}", exc_info=True)
+            return twiml_response(
+                "error processing command. try again or text 'tutorial'."
+            )
 
     except Exception as e:
         logger.error(f"error processing sms command: {e}", exc_info=True)

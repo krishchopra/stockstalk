@@ -699,27 +699,38 @@ class AIAssistant:
             input_text = f"{SYSTEM_PROMPT}{watchlist_context}{history_text}\n\nUser message: {user_message}"
 
             # Make the API call with tools
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    self.OPENAI_API_URL,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": self.model,
-                        "input": input_text,
-                        "tools": TOOLS,
-                    },
-                )
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"OpenAI API error: {response.status_code} - {response.text}"
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    logger.debug(f"Calling OpenAI API with model {self.model}")
+                    response = await client.post(
+                        self.OPENAI_API_URL,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model,
+                            "input": input_text,
+                            "tools": TOOLS,
+                        },
                     )
-                    return await self._fallback_response(user_message, user_watchlist)
 
-                data = response.json()
+                    if response.status_code != 200:
+                        logger.error(
+                            f"OpenAI API error: {response.status_code} - {response.text}"
+                        )
+                        return await self._fallback_response(
+                            user_message, user_watchlist
+                        )
+
+                    data = response.json()
+                    logger.debug("OpenAI API response received")
+            except httpx.TimeoutException:
+                logger.error("OpenAI API request timed out after 30 seconds")
+                return await self._fallback_response(user_message, user_watchlist)
+            except httpx.RequestError as e:
+                logger.error(f"OpenAI API request error: {e}")
+                return await self._fallback_response(user_message, user_watchlist)
 
             # Process the response - handle tool calls in a loop
             max_iterations = 5
@@ -849,40 +860,57 @@ class AIAssistant:
                         )
 
                     # Continue the conversation with tool results
-                    async with httpx.AsyncClient(timeout=60.0) as client:
-                        response = await client.post(
-                            self.OPENAI_API_URL,
-                            headers={
-                                "Authorization": f"Bearer {self.api_key}",
-                                "Content-Type": "application/json",
-                            },
-                            json={
-                                "model": self.model,
-                                "input": tool_results,
-                                "previous_response_id": data.get("id"),
-                            },
-                        )
-
-                        if response.status_code != 200:
-                            logger.error(
-                                f"OpenAI API error on continuation: {response.status_code}"
+                    try:
+                        async with httpx.AsyncClient(timeout=30.0) as client:
+                            response = await client.post(
+                                self.OPENAI_API_URL,
+                                headers={
+                                    "Authorization": f"Bearer {self.api_key}",
+                                    "Content-Type": "application/json",
+                                },
+                                json={
+                                    "model": self.model,
+                                    "input": tool_results,
+                                    "previous_response_id": data.get("id"),
+                                },
                             )
-                            # Return partial results
-                            response_text = self._format_tool_results(tool_results)
-                            # Save conversation
-                            if db:
-                                try:
-                                    await db.add_conversation_message(
-                                        user_phone, "user", user_message
-                                    )
-                                    await db.add_conversation_message(
-                                        user_phone, "assistant", response_text
-                                    )
-                                except Exception as e:
-                                    logger.debug(f"Could not save conversation: {e}")
-                            return response_text
 
-                        data = response.json()
+                            if response.status_code != 200:
+                                logger.error(
+                                    f"OpenAI API error on continuation: {response.status_code}"
+                                )
+                                # Return partial results
+                                response_text = self._format_tool_results(tool_results)
+                                # Save conversation
+                                if db:
+                                    try:
+                                        await db.add_conversation_message(
+                                            user_phone, "user", user_message
+                                        )
+                                        await db.add_conversation_message(
+                                            user_phone, "assistant", response_text
+                                        )
+                                    except Exception as e:
+                                        logger.debug(
+                                            f"Could not save conversation: {e}"
+                                        )
+                                return response_text
+
+                            data = response.json()
+                    except (httpx.TimeoutException, httpx.RequestError) as e:
+                        logger.error(f"OpenAI API continuation error: {e}")
+                        response_text = self._format_tool_results(tool_results)
+                        if db:
+                            try:
+                                await db.add_conversation_message(
+                                    user_phone, "user", user_message
+                                )
+                                await db.add_conversation_message(
+                                    user_phone, "assistant", response_text
+                                )
+                            except Exception:
+                                pass
+                        return response_text
                 else:
                     # Unknown format, try output_text
                     output_text = data.get("output_text", "")
@@ -920,6 +948,9 @@ class AIAssistant:
                     return "i couldn't process that. try again."
 
             # Max iterations reached - save what we have
+            logger.warning(
+                f"Max iterations ({max_iterations}) reached for query: {user_message[:50]}"
+            )
             response_text = "i'm still thinking about that. try a simpler question."
             if db:
                 try:
