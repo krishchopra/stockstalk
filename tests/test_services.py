@@ -1,6 +1,5 @@
 """Tests for services."""
 
-
 import pytest
 
 from stockstalk.models import (
@@ -107,9 +106,7 @@ def test_stock_analyzer_initialization() -> None:
     data_fetcher = StockDataFetcher()
     notification_config = NotificationConfig()
     notifier = NotificationService(notification_config)
-    analyzer = StockAnalyzer(
-        data_fetcher, notifier, notification_config, lookback_days=30
-    )
+    analyzer = StockAnalyzer(data_fetcher, notifier, notification_config, lookback_days=30)
 
     assert analyzer.lookback_days == 30
     assert analyzer.data_fetcher is data_fetcher
