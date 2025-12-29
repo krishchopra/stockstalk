@@ -13,19 +13,19 @@ logger = logging.getLogger(__name__)
 # Exchange suffixes to try when a symbol isn't found
 # Order matters - most common first
 EXCHANGE_SUFFIXES = [
-    "",       # US (NYSE, NASDAQ) - no suffix
-    ".TO",    # Toronto Stock Exchange
-    ".V",     # TSX Venture Exchange
-    ".L",     # London Stock Exchange
-    ".AX",    # Australian Stock Exchange
-    ".DE",    # Deutsche Börse (Frankfurt)
-    ".PA",    # Euronext Paris
-    ".MI",    # Borsa Italiana (Milan)
-    ".AS",    # Euronext Amsterdam
-    ".HK",    # Hong Kong Stock Exchange
-    ".T",     # Tokyo Stock Exchange
-    ".NS",    # National Stock Exchange of India
-    ".BO",    # Bombay Stock Exchange
+    "",  # US (NYSE, NASDAQ) - no suffix
+    ".TO",  # Toronto Stock Exchange
+    ".V",  # TSX Venture Exchange
+    ".L",  # London Stock Exchange
+    ".AX",  # Australian Stock Exchange
+    ".DE",  # Deutsche Börse (Frankfurt)
+    ".PA",  # Euronext Paris
+    ".MI",  # Borsa Italiana (Milan)
+    ".AS",  # Euronext Amsterdam
+    ".HK",  # Hong Kong Stock Exchange
+    ".T",  # Tokyo Stock Exchange
+    ".NS",  # National Stock Exchange of India
+    ".BO",  # Bombay Stock Exchange
 ]
 
 
@@ -109,7 +109,7 @@ class StockDataFetcher:
         Fetch current stock data, trying multiple exchanges if needed.
         """
         base_symbol = symbol.upper().split(".")[0]  # Remove any existing suffix
-        
+
         # Try each exchange suffix
         for suffix in EXCHANGE_SUFFIXES:
             full_symbol = f"{base_symbol}{suffix}"
@@ -118,7 +118,7 @@ class StockDataFetcher:
                 if suffix:
                     logger.info(f"found {base_symbol} on exchange: {suffix.replace('.', '')}")
                 return result
-        
+
         raise ValueError(f"could not find {symbol} on any exchange")
 
     def _fetch_historical_data_sync(self, symbol: str, days: int) -> HistoricalData:
@@ -126,14 +126,14 @@ class StockDataFetcher:
         Fetch historical stock data, trying multiple exchanges if needed.
         """
         base_symbol = symbol.upper().split(".")[0]  # Remove any existing suffix
-        
+
         # Try each exchange suffix
         for suffix in EXCHANGE_SUFFIXES:
             full_symbol = f"{base_symbol}{suffix}"
             result = self._try_fetch_historical_data_sync(full_symbol, days)
             if result is not None:
                 return result
-        
+
         raise ValueError(f"no historical data for {symbol} on any exchange")
 
     async def get_current_data(self, symbol: str) -> StockData:
@@ -163,7 +163,7 @@ class StockDataFetcher:
         """
         # First find which exchange has the symbol
         base_symbol = symbol.upper().split(".")[0]
-        
+
         # Try to find the symbol on any exchange
         found_symbol = None
         for suffix in EXCHANGE_SUFFIXES:
@@ -174,10 +174,10 @@ class StockDataFetcher:
                 if suffix:
                     logger.info(f"found {base_symbol} on exchange: {suffix.replace('.', '')}")
                 break
-        
+
         if not found_symbol:
             raise ValueError(f"could not find {symbol} on any exchange")
-        
+
         # Now fetch both current and historical with the found symbol
         current_task = self.get_current_data(found_symbol)
         historical_task = self.get_historical_data(found_symbol, days)

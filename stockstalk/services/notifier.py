@@ -55,7 +55,9 @@ class NotificationService:
             AlertPriority.CRITICAL: 3,
         }
 
-        meets_threshold = priority_order[result.priority] >= priority_order[self.config.min_priority]
+        meets_threshold = (
+            priority_order[result.priority] >= priority_order[self.config.min_priority]
+        )
         if not meets_threshold:
             logger.info(
                 f"  {result.symbol}/{result.indicator_name}: priority {result.priority.value} "
