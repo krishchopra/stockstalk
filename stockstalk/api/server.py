@@ -12,13 +12,12 @@ from stockstalk.models import WatchlistItem
 from stockstalk.services.analyzer import IndicatorRegistry, StockAnalyzer
 from stockstalk.services.data_fetcher import StockDataFetcher
 from stockstalk.services.notifier import NotificationService
+from stockstalk.settings import settings
 from stockstalk.storage import get_database, init_database
-from stockstalk.utils.config import ConfigManager
 
 logger = logging.getLogger(__name__)
 
 # Global services
-_config_manager: ConfigManager | None = None
 _stock_analyzer: StockAnalyzer | None = None
 
 
@@ -27,7 +26,7 @@ async def lifespan(app: FastAPI):
     """Manage application lifespan - startup and shutdown."""
     # Startup
     logger.info("Starting StockStalk API server...")
-    await init_database()
+    await init_database(settings.DATABASE_URL)
     logger.info("Database initialized")
     yield
     # Shutdown
@@ -36,8 +35,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="StockStalk API",
-    description="Stock monitoring and analysis API with AWS SNS notifications",
-    version="0.2.0",
+    description="Stock monitoring and analysis API with Twilio SMS notifications",
+    version="0.3.0",
     lifespan=lifespan,
 )
 
@@ -87,16 +86,14 @@ class MessageResponse(BaseModel):
     message: str
 
 
-def init_app(config_mgr: ConfigManager, analyzer: StockAnalyzer) -> None:
+def init_app(analyzer: StockAnalyzer) -> None:
     """
     Initialize the FastAPI app with dependencies.
 
     Args:
-        config_mgr: Configuration manager
         analyzer: Stock analyzer
     """
-    global _config_manager, _stock_analyzer
-    _config_manager = config_mgr
+    global _stock_analyzer
     _stock_analyzer = analyzer
 
 
@@ -203,42 +200,19 @@ async def get_quote(symbol: str) -> dict[str, Any]:
 
 @app.get("/api/watchlist", response_model=WatchlistResponse)
 async def get_watchlist() -> WatchlistResponse:
-    """Get current watchlist from config and database."""
+    """Get all watched symbols from the database (union of all user watchlists)."""
     try:
-        config_manager = _config_manager or ConfigManager()
-        config = config_manager.load_config()
+        db = get_database()
+        watched_symbols = await db.get_all_watched_symbols()
 
-        # Get config-based watchlist
         watchlist = [
             WatchlistItemResponse(
-                symbol=item.symbol,
-                indicators=item.enabled_indicators,
-                custom_params=item.custom_params,
+                symbol=item["symbol"],
+                indicators=item["enabled_indicators"],
+                custom_params={},
             )
-            for item in config.watchlist
+            for item in watched_symbols
         ]
-
-        # Add database-based watchlist items
-        try:
-            db = get_database()
-            db_items = await db.get_watchlist(enabled_only=True)
-            for item in db_items:
-                # Skip if already in config watchlist
-                if any(w.symbol == item.symbol for w in watchlist):
-                    continue
-                import json
-
-                watchlist.append(
-                    WatchlistItemResponse(
-                        symbol=item.symbol,
-                        indicators=(
-                            json.loads(item.enabled_indicators) if item.enabled_indicators else []
-                        ),
-                        custom_params=json.loads(item.custom_params) if item.custom_params else {},
-                    )
-                )
-        except Exception as e:
-            logger.warning(f"Could not fetch DB watchlist: {e}")
 
         return WatchlistResponse(watchlist=watchlist)
 
@@ -249,7 +223,7 @@ async def get_watchlist() -> WatchlistResponse:
 
 @app.post("/api/watchlist", response_model=MessageResponse)
 async def add_to_watchlist(request: AddWatchlistRequest) -> MessageResponse:
-    """Add a symbol to the watchlist (stored in database)."""
+    """Add a symbol to the global watchlist (stored in database)."""
     try:
         db = get_database()
         await db.add_to_watchlist(
@@ -341,12 +315,9 @@ async def list_indicators() -> dict[str, list[str]]:
 
 @app.post("/api/test-sms/{phone_number}", response_model=MessageResponse)
 async def test_sms(phone_number: str) -> MessageResponse:
-    """Send a test SMS to verify AWS SNS configuration."""
+    """Send a test SMS to verify Twilio configuration."""
     try:
-        config_manager = _config_manager or ConfigManager()
-        config = config_manager.load_config()
-        notifier = NotificationService(config.notification_config)
-
+        notifier = NotificationService()
         success = await notifier.send_test_message(phone_number)
         if success:
             return MessageResponse(message=f"Test SMS sent to {phone_number}")
@@ -361,54 +332,38 @@ async def test_sms(phone_number: str) -> MessageResponse:
 @app.get("/api/debug/status")
 async def debug_status() -> dict:
     """
-    Debug endpoint to check notification status, recent alerts, and config.
+    Debug endpoint to check notification status, recent alerts, and settings.
     Useful for diagnosing why texts aren't being sent.
     """
-    from datetime import datetime, timedelta
-
     try:
         db = get_database()
-        config_manager = _config_manager or ConfigManager()
-        config = config_manager.load_config()
 
         # Get recent alerts
-        recent_alerts = await db.get_alerts(limit=20)
         alerts_last_hour = await db.get_alerts_count_since(minutes=60)
 
-        # Check config
-        notif_config = config.notification_config
+        # Get watched symbols count
+        watched_symbols = await db.get_all_watched_symbols()
+
+        # Get phone numbers count
+        phones = await db.get_phone_numbers(enabled_only=True)
 
         return {
-            "notification_config": {
-                "phone_numbers": notif_config.phone_numbers,
-                "min_priority": notif_config.min_priority.value,
-                "cooldown_minutes": notif_config.cooldown_minutes,
-                "max_alerts_per_hour": notif_config.max_alerts_per_hour,
+            "settings": {
+                "min_priority": settings.MIN_PRIORITY.value,
+                "cooldown_minutes": settings.COOLDOWN_MINUTES,
+                "max_alerts_per_hour": settings.MAX_ALERTS_PER_HOUR,
+                "check_interval_minutes": settings.CHECK_INTERVAL_MINUTES,
+                "twilio_configured": settings.is_twilio_configured(),
             },
             "rate_limits": {
                 "alerts_last_hour": alerts_last_hour,
-                "max_per_hour": notif_config.max_alerts_per_hour,
-                "rate_limited": alerts_last_hour >= notif_config.max_alerts_per_hour,
+                "max_per_hour": settings.MAX_ALERTS_PER_HOUR,
+                "rate_limited": alerts_last_hour >= settings.MAX_ALERTS_PER_HOUR,
             },
-            "recent_alerts": [
-                {
-                    "symbol": a.symbol,
-                    "indicator": a.indicator,
-                    "message": a.message,
-                    "priority": a.priority,
-                    "sent_to": a.sent_to,
-                    "created_at": a.created_at.isoformat() if a.created_at else None,
-                    "cooldown_expires": (
-                        (
-                            a.created_at + timedelta(minutes=notif_config.cooldown_minutes)
-                        ).isoformat()
-                        if a.created_at
-                        else None
-                    ),
-                }
-                for a in recent_alerts
-            ],
-            "now": datetime.now().isoformat(),
+            "database": {
+                "watched_symbols": len(watched_symbols),
+                "phone_numbers": len(phones),
+            },
         }
 
     except Exception as e:
@@ -440,12 +395,12 @@ async def sms_webhook(
     Twilio webhook endpoint for incoming SMS.
 
     Commands:
-        <SYMBOL>     - Get current price and quick analysis (e.g., "AAPL")
-        ADD <SYMBOL> - Add stock to watchlist
-        REMOVE <SYMBOL> - Remove stock from watchlist
-        LIST         - Show current watchlist
+        <SYMBOL>     - Get current price and full analysis (e.g., "AAPL")
+        ADD <SYMBOL> - Add stock to your personal watchlist
+        REMOVE <SYMBOL> - Remove stock from your watchlist
+        LIST         - Show your watchlist
         STATUS       - Get alert status summary
-        HELP         - Show available commands
+        TUTORIAL     - Show available commands
     """
     logger.info(f"incoming sms from {From}: {Body}")
 
@@ -457,8 +412,17 @@ async def sms_webhook(
         return twiml_response("empty message. text 'tutorial' for help.")
 
     command = parts[0].lower()
+    user_phone = From  # Use sender's phone as user ID
 
     try:
+        db = get_database()
+
+        # Ensure user exists in phone_numbers table
+        try:
+            await db.add_phone_number(user_phone)
+        except Exception:
+            pass  # Already exists, ignore
+
         # HELP/TUTORIAL command
         if command in ("tutorial", "help"):
             return twiml_response(
@@ -466,67 +430,56 @@ async def sms_webhook(
                 "aapl - get stock info\n"
                 "add aapl - add to watchlist\n"
                 "remove aapl - remove from list\n"
-                "list - show watchlist\n"
+                "list - show your watchlist\n"
                 "status - alert summary"
             )
 
-        # LIST command
+        # LIST command - show user's personal watchlist
         if command == "list":
-            config_manager = _config_manager or ConfigManager()
-            config = config_manager.load_config()
-            symbols = [item.symbol.lower() for item in config.watchlist]
+            user_watchlist = await db.get_user_watchlist(user_phone)
+            symbols = [item.symbol.lower() for item in user_watchlist]
             if symbols:
-                return twiml_response(f"watchlist ({len(symbols)}):\n" + ", ".join(symbols))
+                return twiml_response(f"your watchlist ({len(symbols)}):\n" + ", ".join(symbols))
             else:
-                return twiml_response("watchlist is empty. text 'add <symbol>' to add stocks.")
+                return twiml_response("your watchlist is empty. text 'add <symbol>' to add stocks.")
 
         # STATUS command
         if command == "status":
-            db = get_database()
             alerts_last_hour = await db.get_alerts_count_since(minutes=60)
-            recent_alerts = await db.get_alerts(limit=5)
+            user_watchlist = await db.get_user_watchlist(user_phone)
 
             msg = f"alerts (1hr): {alerts_last_hour}\n"
-            if recent_alerts:
-                msg += "recent:\n"
-                for a in recent_alerts[:3]:
-                    msg += f"- {a.symbol.lower()}/{a.indicator.lower()}\n"
+            msg += f"your stocks: {len(user_watchlist)}\n"
+            if user_watchlist:
+                symbols = [item.symbol.lower() for item in user_watchlist[:5]]
+                msg += f"watching: {', '.join(symbols)}"
             return twiml_response(msg)
 
-        # ADD command
+        # ADD command - add to user's personal watchlist
         if command == "add" and len(parts) >= 2:
             symbol = parts[1].upper()
-            config_manager = _config_manager or ConfigManager()
-            config = config_manager.load_config()
 
-            # Check if already in watchlist
-            existing = [item for item in config.watchlist if item.symbol == symbol]
-            if existing:
+            # Check if already in user's watchlist
+            if await db.user_has_symbol(user_phone, symbol):
                 return twiml_response(f"{symbol.lower()} is already in your watchlist.")
 
-            # Add with default indicators
-            new_item = WatchlistItem(
-                symbol=symbol,
-                enabled_indicators=["RSI", "MACD", "Fundamental_Score"],
+            # Add to user's watchlist with default indicators
+            await db.add_to_user_watchlist(
+                user_phone,
+                symbol,
+                enabled_indicators=settings.DEFAULT_INDICATORS,
             )
-            config.watchlist.append(new_item)
-            config_manager.save_config(config)
-            return twiml_response(f"added {symbol.lower()} to watchlist")
+            return twiml_response(f"added {symbol.lower()} to your watchlist")
 
-        # REMOVE command
+        # REMOVE command - remove from user's personal watchlist
         if command in ("remove", "delete", "rm") and len(parts) >= 2:
             symbol = parts[1].upper()
-            config_manager = _config_manager or ConfigManager()
-            config = config_manager.load_config()
 
-            original_len = len(config.watchlist)
-            config.watchlist = [item for item in config.watchlist if item.symbol != symbol]
-
-            if len(config.watchlist) < original_len:
-                config_manager.save_config(config)
-                return twiml_response(f"removed {symbol.lower()} from watchlist")
+            removed = await db.remove_from_user_watchlist(user_phone, symbol)
+            if removed:
+                return twiml_response(f"removed {symbol.lower()} from your watchlist")
             else:
-                return twiml_response(f"{symbol.lower()} not found in watchlist")
+                return twiml_response(f"{symbol.lower()} not in your watchlist")
 
         # Assume it's a stock symbol - run full analysis
         symbol = command.upper()

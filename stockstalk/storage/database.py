@@ -5,7 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, select
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, UniqueConstraint, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -33,7 +33,7 @@ class AlertRecord(Base):
 
 
 class WatchlistRecord(Base):
-    """Runtime watchlist additions (overlays config.json)."""
+    """Legacy global watchlist (deprecated, kept for compatibility)."""
 
     __tablename__ = "watchlist"
 
@@ -43,6 +43,23 @@ class WatchlistRecord(Base):
     custom_params = Column(Text)  # JSON object
     enabled = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class UserWatchlistRecord(Base):
+    """Per-user watchlist items, keyed by phone number."""
+
+    __tablename__ = "user_watchlist"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    phone_number = Column(String(20), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    enabled_indicators = Column(Text)  # JSON array
+    custom_params = Column(Text)  # JSON object
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Composite unique constraint: one symbol per user
+    __table_args__ = (UniqueConstraint("phone_number", "symbol", name="uq_user_symbol"),)
 
 
 class PhoneNumberRecord(Base):
@@ -176,6 +193,88 @@ class Database:
                 return True
             return False
 
+    # User watchlist methods (per-phone-number)
+    async def add_to_user_watchlist(
+        self,
+        phone_number: str,
+        symbol: str,
+        enabled_indicators: list[str] | None = None,
+        custom_params: dict[str, Any] | None = None,
+    ) -> UserWatchlistRecord:
+        """Add a symbol to a user's personal watchlist."""
+        # Default indicators if none provided
+        if enabled_indicators is None:
+            enabled_indicators = ["RSI", "MACD", "Fundamental_Score"]
+
+        async with self.async_session() as session:
+            # Check if already exists
+            result = await session.execute(
+                select(UserWatchlistRecord)
+                .where(UserWatchlistRecord.phone_number == phone_number)
+                .where(UserWatchlistRecord.symbol == symbol.upper())
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                # Update existing record
+                existing.enabled_indicators = json.dumps(enabled_indicators)
+                existing.custom_params = json.dumps(custom_params) if custom_params else None
+                existing.enabled = True
+                await session.commit()
+                await session.refresh(existing)
+                return existing
+
+            # Create new record
+            record = UserWatchlistRecord(
+                phone_number=phone_number,
+                symbol=symbol.upper(),
+                enabled_indicators=json.dumps(enabled_indicators),
+                custom_params=json.dumps(custom_params) if custom_params else None,
+                enabled=True,
+            )
+            session.add(record)
+            await session.commit()
+            await session.refresh(record)
+            return record
+
+    async def get_user_watchlist(
+        self, phone_number: str, enabled_only: bool = True
+    ) -> list[UserWatchlistRecord]:
+        """Get a user's personal watchlist."""
+        async with self.async_session() as session:
+            query = select(UserWatchlistRecord).where(
+                UserWatchlistRecord.phone_number == phone_number
+            )
+            if enabled_only:
+                query = query.where(UserWatchlistRecord.enabled == True)  # noqa: E712
+            result = await session.execute(query.order_by(UserWatchlistRecord.symbol))
+            return list(result.scalars().all())
+
+    async def remove_from_user_watchlist(self, phone_number: str, symbol: str) -> bool:
+        """Remove a symbol from a user's personal watchlist."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(UserWatchlistRecord)
+                .where(UserWatchlistRecord.phone_number == phone_number)
+                .where(UserWatchlistRecord.symbol == symbol.upper())
+            )
+            record = result.scalar_one_or_none()
+            if record:
+                await session.delete(record)
+                await session.commit()
+                return True
+            return False
+
+    async def user_has_symbol(self, phone_number: str, symbol: str) -> bool:
+        """Check if a user has a symbol in their watchlist."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(UserWatchlistRecord)
+                .where(UserWatchlistRecord.phone_number == phone_number)
+                .where(UserWatchlistRecord.symbol == symbol.upper())
+                .where(UserWatchlistRecord.enabled == True)  # noqa: E712
+            )
+            return result.scalar_one_or_none() is not None
+
     # Phone number methods
     async def add_phone_number(
         self, phone_number: str, label: str | None = None
@@ -213,6 +312,45 @@ class Database:
                 await session.commit()
                 return True
             return False
+
+    # Aggregation methods for scheduler
+    async def get_all_watched_symbols(self) -> list[dict]:
+        """
+        Get all unique symbols being watched across all users.
+        Returns a list of dicts with symbol and merged indicator settings.
+        Used by scheduler to know what to analyze.
+        """
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(UserWatchlistRecord).where(UserWatchlistRecord.enabled == True)  # noqa: E712
+            )
+            records = result.scalars().all()
+
+            # Merge indicators by symbol
+            symbol_map: dict[str, set[str]] = {}
+            for record in records:
+                symbol = record.symbol
+                if symbol not in symbol_map:
+                    symbol_map[symbol] = set()
+                if record.enabled_indicators:
+                    indicators = json.loads(record.enabled_indicators)
+                    symbol_map[symbol].update(indicators)
+
+            return [
+                {"symbol": symbol, "enabled_indicators": list(indicators)}
+                for symbol, indicators in sorted(symbol_map.items())
+            ]
+
+    async def get_users_watching_symbol(self, symbol: str) -> list[str]:
+        """Get all phone numbers watching a specific symbol."""
+        async with self.async_session() as session:
+            result = await session.execute(
+                select(UserWatchlistRecord.phone_number)
+                .where(UserWatchlistRecord.symbol == symbol.upper())
+                .where(UserWatchlistRecord.enabled == True)  # noqa: E712
+                .distinct()
+            )
+            return [row[0] for row in result.fetchall()]
 
 
 # Global database instance

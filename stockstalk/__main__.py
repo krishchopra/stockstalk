@@ -3,7 +3,6 @@
 import asyncio
 import logging
 import sys
-from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -29,19 +28,19 @@ logging.getLogger("apscheduler").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-async def run_analysis_async(config_path: Path, dry_run: bool = False) -> None:
+async def run_analysis_async(dry_run: bool = False) -> None:
     """
-    Run stock analysis for all watchlist items asynchronously.
+    Run stock analysis for all watched symbols asynchronously.
 
     Args:
-        config_path: Path to configuration file
         dry_run: If True, analyze but don't send SMS notifications
     """
+    from stockstalk.models import WatchlistItem
     from stockstalk.services.analyzer import StockAnalyzer
     from stockstalk.services.data_fetcher import StockDataFetcher
     from stockstalk.services.notifier import NotificationService
-    from stockstalk.storage import init_database
-    from stockstalk.utils.config import ConfigManager
+    from stockstalk.settings import settings
+    from stockstalk.storage import get_database, init_database
 
     try:
         mode_str = "DRY-RUN (no SMS)" if dry_run else "LIVE"
@@ -50,32 +49,42 @@ async def run_analysis_async(config_path: Path, dry_run: bool = False) -> None:
         logger.info("=" * 60)
 
         # Initialize database
-        await init_database()
+        await init_database(settings.DATABASE_URL)
+        db = get_database()
 
-        # Load config
-        config_manager = ConfigManager(config_path)
-        config = config_manager.load_config()
+        # Get all watched symbols from database (union of all users' watchlists)
+        watched_symbols = await db.get_all_watched_symbols()
 
-        if not config.watchlist:
-            logger.warning("Watchlist is empty. Add stocks to analyze.")
+        if not watched_symbols:
+            logger.warning("No symbols being watched. Users can add stocks via SMS.")
             return
+
+        logger.info(f"Analyzing {len(watched_symbols)} symbols from user watchlists")
+
+        # Convert to WatchlistItem format for analyzer
+        watchlist = [
+            WatchlistItem(
+                symbol=item["symbol"],
+                enabled_indicators=item["enabled_indicators"],
+            )
+            for item in watched_symbols
+        ]
 
         # Initialize services
         data_fetcher = StockDataFetcher()
-        notifier = NotificationService(config.notification_config)
+        notifier = NotificationService()
         analyzer = StockAnalyzer(
             data_fetcher=data_fetcher,
             notifier=notifier,
-            notification_config=config.notification_config,
-            lookback_days=config.data_lookback_days,
+            lookback_days=settings.DATA_LOOKBACK_DAYS,
         )
 
-        # Analyze all stocks (don't send alerts in dry-run mode)
+        # Analyze all stocks
         if dry_run:
             # Analyze without sending notifications
             all_results = {}
             all_alerts = []
-            for item in config.watchlist:
+            for item in watchlist:
                 item_results = await analyzer.analyze_stock(item, send_alerts=False)
                 all_results[item.symbol] = item_results
                 for r in item_results:
@@ -83,7 +92,7 @@ async def run_analysis_async(config_path: Path, dry_run: bool = False) -> None:
                         all_alerts.append(r)
             results = all_results
         else:
-            results = await analyzer.analyze_watchlist(config.watchlist)
+            results = await analyzer.analyze_watchlist(watchlist)
             all_alerts = []
 
         # Log summary
@@ -96,15 +105,10 @@ async def run_analysis_async(config_path: Path, dry_run: bool = False) -> None:
         # In dry-run mode, print what would be sent as SMS
         if dry_run and all_alerts:
             print("\n" + "=" * 60)
-            print("📱 SMS DIGEST (what would be sent):")
+            print("SMS DIGEST (what would be sent):")
             print("=" * 60)
 
-            # Use the notifier's formatting logic
-            from stockstalk.models import NotificationConfig
-            from stockstalk.services.notifier import NotificationService
-
-            temp_notifier = NotificationService(NotificationConfig())
-            # Pass all_results so we can show triggered/total for each stock
+            temp_notifier = NotificationService()
             digest_msg = temp_notifier._format_digest(
                 all_alerts[:10], len(all_alerts), all_results_by_symbol=all_results
             )
@@ -119,27 +123,18 @@ async def run_analysis_async(config_path: Path, dry_run: bool = False) -> None:
         logger.error(f"Error during analysis run: {e}", exc_info=True)
 
 
-async def run_scheduler_async(config_path: Path) -> None:
-    """
-    Run the async scheduler for periodic stock analysis.
-
-    Args:
-        config_path: Path to configuration file
-    """
+async def run_scheduler_async() -> None:
+    """Run the async scheduler for periodic stock analysis."""
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.triggers.interval import IntervalTrigger
 
+    from stockstalk.settings import settings
     from stockstalk.storage import init_database
-    from stockstalk.utils.config import ConfigManager
 
     # Initialize database
-    await init_database()
+    await init_database(settings.DATABASE_URL)
 
-    # Load config
-    config_manager = ConfigManager(config_path)
-    config = config_manager.load_config()
-    interval_minutes = config.check_interval_minutes
-
+    interval_minutes = settings.CHECK_INTERVAL_MINUTES
     logger.info(f"Starting scheduler - checking every {interval_minutes} minutes")
 
     # Create scheduler
@@ -147,7 +142,7 @@ async def run_scheduler_async(config_path: Path) -> None:
 
     async def scheduled_analysis() -> None:
         """Run a scheduled analysis."""
-        await run_analysis_async(config_path)
+        await run_analysis_async()
 
     # Add job
     scheduler.add_job(
@@ -163,7 +158,7 @@ async def run_scheduler_async(config_path: Path) -> None:
     logger.info("Scheduler started")
 
     # Run initial analysis
-    await run_analysis_async(config_path)
+    await run_analysis_async()
 
     # Keep running
     try:
@@ -174,113 +169,31 @@ async def run_scheduler_async(config_path: Path) -> None:
         scheduler.shutdown()
 
 
-def run_server(config_path: Path, host: str, port: int) -> None:
-    """
-    Run the FastAPI server with uvicorn.
-
-    Args:
-        config_path: Path to configuration file
-        host: Host to bind to
-        port: Port to bind to
-    """
+def run_server() -> None:
+    """Run the FastAPI server with uvicorn."""
     import uvicorn
 
     from stockstalk.api.server import app, init_app
     from stockstalk.services.analyzer import StockAnalyzer
     from stockstalk.services.data_fetcher import StockDataFetcher
     from stockstalk.services.notifier import NotificationService
-    from stockstalk.utils.config import ConfigManager
+    from stockstalk.settings import settings
 
-    # Load config and initialize services
-    config_manager = ConfigManager(config_path)
-    config = config_manager.load_config()
-
+    # Initialize services
     data_fetcher = StockDataFetcher()
-    notifier = NotificationService(config.notification_config)
+    notifier = NotificationService()
     analyzer = StockAnalyzer(
         data_fetcher=data_fetcher,
         notifier=notifier,
-        notification_config=config.notification_config,
-        lookback_days=config.data_lookback_days,
+        lookback_days=settings.DATA_LOOKBACK_DAYS,
     )
 
-    init_app(config_manager, analyzer)
+    init_app(analyzer)
 
-    logger.info(f"Starting API server on {host}:{port}")
-    logger.info(f"API docs available at http://{host}:{port}/docs")
+    logger.info(f"Starting API server on {settings.HOST}:{settings.PORT}")
+    logger.info(f"API docs available at http://{settings.HOST}:{settings.PORT}/docs")
 
-    uvicorn.run(app, host=host, port=port)
-
-
-async def generate_vti_watchlist_async(
-    config_path: Path,
-    top_n: int = 1000,
-    etf_symbol: str = "VTI",
-) -> None:
-    """
-    Generate a watchlist from VTI (or other ETF) top holdings.
-
-    Args:
-        config_path: Path to configuration file
-        top_n: Number of top holdings to include
-        etf_symbol: ETF symbol to fetch holdings from
-    """
-    from stockstalk.services.etf_holdings import ETFHoldingsFetcher
-    from stockstalk.utils.config import ConfigManager
-
-    logger.info(f"Generating watchlist from {etf_symbol} top {top_n} holdings...")
-
-    # Fetch holdings and generate watchlist
-    fetcher = ETFHoldingsFetcher(etf_symbol)
-    watchlist = await fetcher.generate_watchlist(
-        top_n=top_n,
-        include_volume_spike=True,  # Always include volume spike detection
-    )
-
-    # Load existing config to preserve notification settings
-    config_manager = ConfigManager(config_path)
-    try:
-        existing_config = config_manager.load_config()
-        notification_config = existing_config.notification_config
-        check_interval = existing_config.check_interval_minutes
-        lookback_days = existing_config.data_lookback_days
-    except Exception:
-        from stockstalk.models import NotificationConfig
-
-        notification_config = NotificationConfig()
-        check_interval = 60
-        lookback_days = 30
-
-    # Create new config with VTI watchlist
-    from stockstalk.models import AppConfig
-
-    new_config = AppConfig(
-        watchlist=watchlist,
-        notification_config=notification_config,
-        check_interval_minutes=check_interval,
-        data_lookback_days=lookback_days,
-    )
-
-    # Save to config file
-    config_manager.save_config(new_config)
-
-    logger.info(f"✅ Generated watchlist with {len(watchlist)} stocks")
-    logger.info("📊 All stocks have Volume_Spike indicator enabled")
-    logger.info(f"💾 Config saved to {config_path}")
-
-    # Print summary
-    print(f"\n🎯 VTI Top {len(watchlist)} Watchlist Generated!")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"📈 Stocks added: {len(watchlist)}")
-    print("🔔 Volume Spike detection: ENABLED for all stocks")
-    print(f"📁 Saved to: {config_path}")
-    print("\nTop 20 holdings:")
-    for i, item in enumerate(watchlist[:20], 1):
-        indicators = ", ".join(item.enabled_indicators[:3])
-        if len(item.enabled_indicators) > 3:
-            indicators += f" +{len(item.enabled_indicators) - 3} more"
-        print(f"  {i:2}. {item.symbol:6} → {indicators}")
-    print("\n💡 Run 'python -m stockstalk --once' to analyze all stocks")
+    uvicorn.run(app, host=settings.HOST, port=settings.PORT)
 
 
 def main() -> None:
@@ -288,17 +201,6 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="StockStalk - Async Stock Monitoring App")
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("config.json"),
-        help="Path to configuration file",
-    )
-    parser.add_argument(
-        "--configure",
-        action="store_true",
-        help="Run configuration UI",
-    )
     parser.add_argument(
         "--server",
         action="store_true",
@@ -310,23 +212,6 @@ def main() -> None:
         help="Run analysis once and exit",
     )
     parser.add_argument(
-        "--generate-vti",
-        action="store_true",
-        help="Generate watchlist from VTI top holdings",
-    )
-    parser.add_argument(
-        "--top-n",
-        type=int,
-        default=1000,
-        help="Number of top holdings to include (default: 1000)",
-    )
-    parser.add_argument(
-        "--etf",
-        type=str,
-        default="VTI",
-        help="ETF symbol to fetch holdings from (default: VTI)",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Analyze stocks but don't send SMS (shows what would be sent)",
@@ -334,43 +219,36 @@ def main() -> None:
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
-        help="Host for API server (default: 0.0.0.0)",
+        help="Host for API server (default: from env or 0.0.0.0)",
     )
     parser.add_argument(
         "--port",
         type=int,
-        default=8000,
-        help="Port for API server (default: 8000)",
+        help="Port for API server (default: from env or 8000)",
     )
 
     args = parser.parse_args()
 
-    if args.generate_vti:
-        # Generate VTI watchlist
-        asyncio.run(generate_vti_watchlist_async(args.config, args.top_n, args.etf))
+    # Override settings from CLI args if provided
+    from stockstalk.settings import settings
 
-    elif args.configure:
-        # Run configuration UI
-        from stockstalk.utils.terminal_ui import TerminalUI
-        from stockstalk.utils.config import ConfigManager
+    if args.host:
+        settings.HOST = args.host
+    if args.port:
+        settings.PORT = args.port
 
-        config_manager = ConfigManager(args.config)
-        ui = TerminalUI(config_manager)
-        ui.run()
-
-    elif args.server:
+    if args.server:
         # Run API server
-        run_server(args.config, args.host, args.port)
+        run_server()
 
     elif args.once or args.dry_run:
         # Run analysis once (with optional dry-run mode)
-        asyncio.run(run_analysis_async(args.config, dry_run=args.dry_run))
+        asyncio.run(run_analysis_async(dry_run=args.dry_run))
 
     else:
         # Run scheduled analysis
         try:
-            asyncio.run(run_scheduler_async(args.config))
+            asyncio.run(run_scheduler_async())
         except KeyboardInterrupt:
             logger.info("Shutting down...")
 
