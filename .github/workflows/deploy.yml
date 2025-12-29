@@ -18,40 +18,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Deploy via EC2 Instance Connect Endpoint
+      - name: Deploy via SSM
         env:
           INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
         run: |
-          # Use AWS CLI to connect through the EIC Endpoint
-          aws ec2-instance-connect ssh \
-            --instance-id $INSTANCE_ID \
-            --os-user ec2-user \
-            --connection-type eice \
-            --command '
-              set -e
-              echo "Navigating to project directory..."
-              cd ~/stockstalk
+          # Send deploy command via SSM
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "set -e",
+              "cd /home/ec2-user/stockstalk",
+              "echo Pulling latest changes...",
+              "git pull origin main",
+              "echo Current commit:",
+              "git log -1 --oneline",
+              "echo Stopping existing containers...",
+              "docker-compose down",
+              "echo Building and starting containers...",
+              "docker-compose up --build -d",
+              "sleep 5",
+              "echo Container status:",
+              "docker-compose ps",
+              "echo Deployment complete!"
+            ]' \
+            --query 'Command.CommandId' \
+            --output text)
 
-              echo "Pulling latest changes..."
-              git pull origin main
+          echo "Command ID: $COMMAND_ID"
 
-              echo "Current commit:"
-              git log -1 --oneline
+          # Wait for command to complete
+          echo "Waiting for command to complete..."
+          aws ssm wait command-executed \
+            --instance-id "$INSTANCE_ID" \
+            --command-id "$COMMAND_ID" || true
 
-              echo "🛑 Stopping existing containers..."
-              docker-compose down
-
-              echo "🔨 Building and starting containers..."
-              docker-compose up --build -d
-
-              echo "⏳ Waiting for container to be healthy..."
-              sleep 5
-
-              echo "Container status:"
-              docker-compose ps
-
-              echo "Recent logs:"
-              docker-compose logs --tail=20
-
-              echo "✅ Deployment complete!"
-            '
+          # Get command output
+          echo "=== Command Output ==="
+          aws ssm get-command-invocation \
+            --instance-id "$INSTANCE_ID" \
+            --command-id "$COMMAND_ID" \
+            --query '[Status, StandardOutputContent, StandardErrorContent]' \
+            --output text
