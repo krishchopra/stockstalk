@@ -866,7 +866,28 @@ class AIAssistant:
                             elif isinstance(last_output, str):
                                 content = last_output
                             else:
-                                content = str(last_output)
+                                # Handle ResponseOutputMessage objects
+                                if hasattr(last_output, "content"):
+                                    raw_content = last_output.content
+                                    if isinstance(raw_content, list):
+                                        # Extract text from ResponseOutputText objects
+                                        text_parts = []
+                                        for block in raw_content:
+                                            if hasattr(block, "text"):
+                                                text_parts.append(block.text)
+                                            elif isinstance(block, str):
+                                                text_parts.append(block)
+                                            elif isinstance(block, dict):
+                                                text_parts.append(block.get("text", ""))
+                                        content = " ".join(text_parts)
+                                    elif isinstance(raw_content, str):
+                                        content = raw_content
+                                    else:
+                                        content = str(raw_content)
+                                elif hasattr(last_output, "text"):
+                                    content = last_output.text
+                                else:
+                                    content = str(last_output)
                             response_text = (
                                 content.lower()
                                 if content
