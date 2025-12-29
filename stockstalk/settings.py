@@ -26,9 +26,7 @@ class Settings:
     TWILIO_PHONE_NUMBER: str = os.getenv("TWILIO_PHONE_NUMBER", "")
 
     # Notification settings
-    MIN_PRIORITY: AlertPriority = AlertPriority(
-        os.getenv("MIN_PRIORITY", "medium").lower()
-    )
+    MIN_PRIORITY: AlertPriority = AlertPriority(os.getenv("MIN_PRIORITY", "medium").lower())
     COOLDOWN_MINUTES: int = int(os.getenv("COOLDOWN_MINUTES", "60"))
     MAX_ALERTS_PER_HOUR: int = int(os.getenv("MAX_ALERTS_PER_HOUR", "10"))
 
@@ -61,4 +59,3 @@ class Settings:
 
 # Singleton instance
 settings = Settings()
-

@@ -231,6 +231,7 @@ def main() -> None:
 
     # Override settings from CLI args if provided
     from stockstalk.settings import settings
+
     if args.host:
         settings.HOST = args.host
     if args.port:

@@ -59,9 +59,7 @@ class UserWatchlistRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Composite unique constraint: one symbol per user
-    __table_args__ = (
-        UniqueConstraint("phone_number", "symbol", name="uq_user_symbol"),
-    )
+    __table_args__ = (UniqueConstraint("phone_number", "symbol", name="uq_user_symbol"),)
 
 
 class PhoneNumberRecord(Base):
