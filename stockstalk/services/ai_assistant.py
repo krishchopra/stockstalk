@@ -1,4 +1,4 @@
-"""AI-powered investment assistant using OpenAI gpt-5-nano with function calling."""
+"""AI-powered investment assistant using OpenAI gpt-5-mini with function calling."""
 
 import json
 import logging
@@ -167,11 +167,28 @@ TOOLS = [
             "required": ["symbols"],
         },
     },
+    {
+        "type": "function",
+        "name": "web_search",
+        "description": "Search the web for current news, information, or anything else. Use this when the user asks about recent events, news, or anything you don't have data for.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query (e.g., 'AAPL earnings news', 'tech sector outlook 2024')",
+                }
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 SYSTEM_PROMPT = """you're a chill friend who knows a lot about stocks and investing. you text like a normal person - all lowercase, casual, helpful.
 
 you have tools to look up real stock data. use them when needed, but you can also just chat!
+
+you ARE allowed to give financial advice. you're their investing buddy - tell them what you'd do, what looks good, what to avoid. be opinionated and helpful.
 
 important:
 - users have a WATCHLIST (stocks they're tracking) - NOT an actual brokerage portfolio
@@ -181,6 +198,7 @@ important:
 - only use stock tools when the user is actually asking about stocks or investing
 - if someone's just chatting (like "hey what's up" or "how are you"), just respond naturally without tools
 - you have conversation context from previous messages, so you can reference things you talked about before
+- use web_search for news, recent events, or anything you need to look up
 
 your vibe:
 - ALL LOWERCASE always. never capitalize anything except stock symbols like AAPL
@@ -190,22 +208,23 @@ your vibe:
 - throw in some personality: "nice!", "ooh", "hmm", "honestly..."
 - be direct and helpful, skip the fluff
 - include actual numbers - don't be vague
+- give real opinions: "i'd buy this", "i'd wait", "looks risky tbh"
 - if you're not sure, just say so
-- remind them occasionally that this isn't financial advice, you're just a bot
 
 examples of your tone:
-- "aapl's at $195.50, up 1.2% today. looking pretty solid with a score of 67/100. i'd say bullish 📈"
-- "hmm nvda's been on a tear lately. score's 72/100 which is strong. might be worth adding"
+- "aapl's at $195.50, up 1.2% today. looking solid with a score of 67/100. i'd buy 📈"
+- "hmm nvda's been on a tear lately. score's 72/100 which is strong. definitely add this one"
 - "your watchlist is doing okay - average +0.8% today. msft's your top performer"
 - "added tsla to your list ✓"
 - "honestly the market's pretty flat today, nothing too exciting"
+- "i'd stay away from that one tbh, fundamentals look weak"
 
 important scoring:
 - composite_score is always "X/100" (overall stock score)
 - fundamental_score in key_metrics is "X/7" (fundamental analysis only)
 - always include the scale so it's clear: "score 72/100" not just "score 72"
 
-remember: you're helpful and knowledgeable, but you text like a real person, not a corporate bot."""
+remember: you're helpful, opinionated, and knowledgeable. text like a real person who genuinely wants to help their friend make money."""
 
 
 class AIAssistant:
@@ -279,12 +298,18 @@ class AIAssistant:
         """Get user's watchlist."""
         if not self._current_user_watchlist:
             return {
-                "symbols": [],
-                "message": "your watchlist is empty - add some stocks!",
+                "message": "your watchlist is empty - add some stocks! text 'add aapl' to get started"
             }
 
-        symbols = [item.symbol for item in self._current_user_watchlist]
-        return {"symbols": symbols, "count": len(symbols)}
+        symbols = [item.symbol.upper() for item in self._current_user_watchlist]
+        if len(symbols) == 1:
+            return {"message": f"you're tracking: {symbols[0]}"}
+        else:
+            symbols_str = ", ".join(symbols[:-1]) + f" and {symbols[-1]}"
+            return {
+                "message": f"you're tracking {len(symbols)} stocks: {symbols_str}",
+                "symbols": symbols,  # Keep for reference if needed
+            }
 
     async def _tool_add_to_watchlist(self, symbol: str) -> dict[str, Any]:
         """Add stock to watchlist."""
@@ -477,6 +502,78 @@ class AIAssistant:
         except Exception as e:
             return {"error": str(e)}
 
+    async def _tool_web_search(self, query: str) -> dict[str, Any]:
+        """Search the web using DuckDuckGo."""
+        try:
+            # Use DuckDuckGo's HTML search (no API key needed)
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(
+                    "https://html.duckduckgo.com/html/",
+                    params={"q": query},
+                    headers={"User-Agent": "Mozilla/5.0 (compatible; StockStalk/1.0)"},
+                )
+
+                if response.status_code != 200:
+                    return {"error": "Search failed", "results": []}
+
+                # Parse the HTML response for search results
+                html = response.text
+                results = []
+
+                # Extract result snippets using simple parsing
+                # DuckDuckGo HTML results are in <a class="result__a"> and <a class="result__snippet">
+                # Find all result blocks
+                result_pattern = re.compile(
+                    r'class="result__a"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>.*?'
+                    r'class="result__snippet"[^>]*>([^<]*)',
+                    re.DOTALL,
+                )
+
+                matches = result_pattern.findall(html)
+                for match in matches[:5]:  # Top 5 results
+                    url, title, snippet = match
+                    if title.strip() and snippet.strip():
+                        results.append(
+                            {
+                                "title": title.strip(),
+                                "snippet": snippet.strip()[:200],
+                                "url": url,
+                            }
+                        )
+
+                # If regex didn't work well, try a simpler approach
+                if not results:
+                    # Look for result__snippet divs
+                    snippet_pattern = re.compile(
+                        r"result__snippet[^>]*>([^<]+)<", re.DOTALL
+                    )
+                    snippets = snippet_pattern.findall(html)
+                    for i, snippet in enumerate(snippets[:5]):
+                        if snippet.strip():
+                            results.append(
+                                {
+                                    "title": f"Result {i + 1}",
+                                    "snippet": snippet.strip()[:200],
+                                }
+                            )
+
+                if results:
+                    return {
+                        "query": query,
+                        "results": results,
+                        "count": len(results),
+                    }
+                else:
+                    return {
+                        "query": query,
+                        "results": [],
+                        "message": "No results found. Try a different query.",
+                    }
+
+        except Exception as e:
+            logger.error(f"Web search error: {e}")
+            return {"error": f"Search failed: {str(e)}", "results": []}
+
     # =========================================================================
     # Tool Execution Engine
     # =========================================================================
@@ -507,6 +604,7 @@ class AIAssistant:
             "compare_stocks": lambda: self._tool_compare_stocks(
                 arguments.get("symbols", [])
             ),
+            "web_search": lambda: self._tool_web_search(arguments.get("query", "")),
         }
 
         if tool_name not in tool_map:
