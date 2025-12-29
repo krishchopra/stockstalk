@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from stockstalk.models import WatchlistItem
+from stockstalk.services.ai_assistant import AIAssistant
 from stockstalk.services.analyzer import IndicatorRegistry, StockAnalyzer
 from stockstalk.services.data_fetcher import StockDataFetcher
 from stockstalk.services.notifier import NotificationService
@@ -334,6 +335,98 @@ async def test_sms(phone_number: str) -> MessageResponse:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/digest/{phone_number}")
+async def send_digest(phone_number: str) -> dict[str, Any]:
+    """
+    Generate and send an AI-powered daily digest to a specific user.
+
+    Args:
+        phone_number: Phone number to send digest to
+    """
+    try:
+        db = get_database()
+        ai_assistant = AIAssistant()
+        notifier = NotificationService()
+
+        # Get user's watchlist
+        user_watchlist = await db.get_user_watchlist(phone_number)
+
+        if not user_watchlist:
+            raise HTTPException(
+                status_code=400,
+                detail="User has no watchlist. Add stocks first.",
+            )
+
+        # Generate digest
+        digest = await ai_assistant.generate_daily_digest(
+            user_watchlist,
+            include_discoveries=True,
+            max_discoveries=3,
+        )
+
+        # Format message
+        message = ai_assistant.format_digest_sms(digest)
+
+        # Send SMS
+        success = await notifier.send_sms(phone_number, message)
+
+        return {
+            "success": success,
+            "message": message,
+            "watchlist_count": len(digest.watchlist_insights),
+            "discoveries_count": len(digest.discovery_insights),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending digest: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/opportunities")
+async def get_opportunities(
+    top_n: int = 50,
+    min_score: float = 50.0,
+    max_results: int = 5,
+) -> dict[str, Any]:
+    """
+    Scan VTI holdings for investment opportunities.
+
+    Args:
+        top_n: Number of top VTI holdings to scan
+        min_score: Minimum composite score threshold
+        max_results: Maximum opportunities to return
+    """
+    try:
+        ai_assistant = AIAssistant()
+        opportunities = await ai_assistant.scan_for_opportunities(
+            top_n=top_n,
+            min_score=min_score,
+            max_results=max_results,
+        )
+
+        return {
+            "opportunities": [
+                {
+                    "symbol": opp.symbol,
+                    "price": opp.price,
+                    "change_percent": opp.change_percent,
+                    "composite_score": opp.composite_score,
+                    "recommendation": opp.recommendation,
+                    "triggered_signals": opp.triggered_signals,
+                    "key_metrics": opp.key_metrics,
+                }
+                for opp in opportunities
+            ],
+            "scanned_count": top_n,
+        }
+
+    except Exception as e:
+        logger.error(f"Error finding opportunities: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/debug/status")
 async def debug_status() -> dict:
     """
@@ -359,6 +452,13 @@ async def debug_status() -> dict:
                 "max_alerts_per_hour": settings.MAX_ALERTS_PER_HOUR,
                 "check_interval_minutes": settings.CHECK_INTERVAL_MINUTES,
                 "twilio_configured": settings.is_twilio_configured(),
+                "openai_configured": settings.is_openai_configured(),
+                "openai_model": settings.OPENAI_MODEL
+                if settings.is_openai_configured()
+                else None,
+                "daily_digest_enabled": settings.DAILY_DIGEST_ENABLED,
+                "daily_digest_time": f"{settings.DAILY_DIGEST_HOUR:02d}:{settings.DAILY_DIGEST_MINUTE:02d}",
+                "daily_digest_timezone": settings.DAILY_DIGEST_TIMEZONE,
             },
             "rate_limits": {
                 "alerts_last_hour": alerts_last_hour,
@@ -397,7 +497,7 @@ async def sms_webhook(
     Body: str = Form(...),
 ) -> PlainTextResponse:
     """
-    Twilio webhook endpoint for incoming SMS.
+    Twilio webhook endpoint for incoming SMS with AI-powered natural language understanding.
 
     Commands:
         <SYMBOL>     - Get current price and full analysis (e.g., "AAPL")
@@ -405,13 +505,21 @@ async def sms_webhook(
         REMOVE <SYMBOL> - Remove stock from your watchlist
         LIST         - Show your watchlist
         STATUS       - Get alert status summary
+        DIGEST       - Get AI-powered daily digest of your watchlist
+        OPPORTUNITIES - Find investment opportunities from VTI
         TUTORIAL     - Show available commands
+
+    Natural Language:
+        "What should I invest in?" - Get personalized recommendations
+        "How's my portfolio doing?" - Get watchlist summary
+        "Tell me about AAPL" - Detailed stock analysis with AI insights
     """
     logger.info(f"incoming sms from {From}: {Body}")
 
     # Parse the command
-    text = Body.strip().upper()
-    parts = text.split()
+    text = Body.strip()
+    text_upper = text.upper()
+    parts = text_upper.split()
 
     if not parts:
         return twiml_response("empty message. text 'tutorial' for help.")
@@ -421,6 +529,7 @@ async def sms_webhook(
 
     try:
         db = get_database()
+        ai_assistant = AIAssistant()
 
         # Ensure user exists in phone_numbers table
         try:
@@ -428,214 +537,32 @@ async def sms_webhook(
         except Exception:
             pass  # Already exists, ignore
 
-        # HELP/TUTORIAL command
-        if command in ("tutorial", "help"):
+        # Get user's watchlist for context
+        user_watchlist = await db.get_user_watchlist(user_phone)
+
+        # HELP/TUTORIAL command - quick response without AI
+        if command in ("tutorial", "help", "?"):
             return twiml_response(
-                "stockstalk commands:\n"
-                "aapl - get stock info\n"
-                "add aapl - add to watchlist\n"
-                "remove aapl - remove from list\n"
-                "list - show your watchlist\n"
-                "status - alert summary"
+                "hey! i'm your stock buddy 📈\n\n"
+                "just text me like you'd text a friend:\n"
+                "• 'how's apple doing?'\n"
+                "• 'add tesla to my list'\n"
+                "• 'what should i invest in?'\n"
+                "• 'compare aapl and msft'\n"
+                "• 'how's my watchlist?'\n"
+                "\nor just send a ticker like 'aapl'"
             )
 
-        # LIST command - show user's personal watchlist
-        if command == "list":
-            user_watchlist = await db.get_user_watchlist(user_phone)
-            symbols = [item.symbol.lower() for item in user_watchlist]
-            if symbols:
-                return twiml_response(
-                    f"your watchlist ({len(symbols)}):\n" + ", ".join(symbols)
-                )
-            else:
-                return twiml_response(
-                    "your watchlist is empty. text 'add <symbol>' to add stocks."
-                )
-
-        # STATUS command
-        if command == "status":
-            alerts_last_hour = await db.get_alerts_count_since(minutes=60)
-            user_watchlist = await db.get_user_watchlist(user_phone)
-
-            msg = f"alerts (1hr): {alerts_last_hour}\n"
-            msg += f"your stocks: {len(user_watchlist)}\n"
-            if user_watchlist:
-                symbols = [item.symbol.lower() for item in user_watchlist[:5]]
-                msg += f"watching: {', '.join(symbols)}"
-            return twiml_response(msg)
-
-        # ADD command - add to user's personal watchlist
-        if command == "add" and len(parts) >= 2:
-            symbol = parts[1].upper()
-
-            # Check if already in user's watchlist
-            if await db.user_has_symbol(user_phone, symbol):
-                return twiml_response(f"{symbol.lower()} is already in your watchlist.")
-
-            # Add to user's watchlist with default indicators
-            await db.add_to_user_watchlist(
-                user_phone,
-                symbol,
-                enabled_indicators=settings.DEFAULT_INDICATORS,
-            )
-            return twiml_response(f"added {symbol.lower()} to your watchlist")
-
-        # REMOVE command - remove from user's personal watchlist
-        if command in ("remove", "delete", "rm") and len(parts) >= 2:
-            symbol = parts[1].upper()
-
-            removed = await db.remove_from_user_watchlist(user_phone, symbol)
-            if removed:
-                return twiml_response(f"removed {symbol.lower()} from your watchlist")
-            else:
-                return twiml_response(f"{symbol.lower()} not in your watchlist")
-
-        # Assume it's a stock symbol - run full analysis
-        symbol = command.upper()
-        data_fetcher = StockDataFetcher()
-
-        try:
-            # Fetch stock data
-            stock_data, historical_data = await data_fetcher.get_stock_data(
-                symbol, days=30
-            )
-
-            price = stock_data.current_price
-            prev_close = stock_data.previous_close
-            change_day = ((price - prev_close) / prev_close) * 100 if prev_close else 0
-
-            # Calculate weekly and monthly changes from historical data
-            closes = historical_data.close_prices
-            change_week = 0.0
-            change_month = 0.0
-            if len(closes) >= 5:
-                week_ago_price = closes[-5]
-                change_week = ((price - week_ago_price) / week_ago_price) * 100
-            if len(closes) >= 21:
-                month_ago_price = closes[-21]
-                change_month = ((price - month_ago_price) / month_ago_price) * 100
-            elif len(closes) >= 1:
-                # Use oldest available if less than 21 days
-                month_ago_price = closes[0]
-                change_month = ((price - month_ago_price) / month_ago_price) * 100
-
-            # Direction indicator
-            if change_day > 0:
-                direction = "📈"
-            elif change_day < 0:
-                direction = "📉"
-            else:
-                direction = "➡️"
-
-            # Start building message with price info
-            msg = f"{symbol.lower()}\n"
-            msg += f"${price:.2f} ({change_day:+.1f}% today) {direction}\n"
-            msg += f"week: {change_week:+.1f}% | month: {change_month:+.1f}%\n"
-            if stock_data.volume:
-                msg += f"vol: {stock_data.volume:,.0f}\n"
-
-            # Run all available indicators
-            all_indicators = IndicatorRegistry.list_indicators()
-
-            triggered_signals = []
-            all_results = []
-            metrics = []
-            fundamental_score = 0
-            fundamental_max = 7
-
-            for indicator_name in all_indicators:
-                try:
-                    indicator = IndicatorRegistry.get_indicator(indicator_name)
-                    result = indicator.analyze(stock_data, historical_data)
-                    all_results.append(result)
-
-                    if result.is_triggered:
-                        priority_prefix = (
-                            "[!] "
-                            if result.priority.value in ("high", "critical")
-                            else ""
-                        )
-                        triggered_signals.append(
-                            f"{priority_prefix}{indicator_name.lower().replace('_', ' ')}"
-                        )
-
-                    # Extract all available metrics from metadata
-                    meta = result.metadata
-
-                    # Technical indicators
-                    if "rsi" in meta and meta["rsi"]:
-                        metrics.append(f"rsi: {meta['rsi']:.1f}")
-                    if "volume_ratio" in meta and meta["volume_ratio"]:
-                        metrics.append(f"vol ratio: {meta['volume_ratio']:.1f}x")
-
-                    # Fundamental indicators
-                    if "score" in meta and indicator_name == "Fundamental_Score":
-                        fundamental_score = meta.get("score", 0)
-                        fundamental_max = meta.get("max_score", 7)
-                    if "debt_to_equity" in meta and meta["debt_to_equity"]:
-                        metrics.append(f"d/e: {meta['debt_to_equity']:.2f}")
-                    if "revenue_growth" in meta and meta["revenue_growth"]:
-                        metrics.append(f"rev growth: {meta['revenue_growth']:.1f}%")
-                    if "earnings_growth" in meta and meta["earnings_growth"]:
-                        metrics.append(
-                            f"earnings growth: {meta['earnings_growth']:.1f}%"
-                        )
-
-                except Exception as e:
-                    logger.debug(f"indicator {indicator_name} failed for {symbol}: {e}")
-
-            # Calculate composite score (0-100)
-            # Based on: signals triggered, signal strength, and fundamental score
-            total_indicators = len(all_results)
-            triggered_count = len(triggered_signals)
-            avg_signal_strength = (
-                sum(r.signal_strength for r in all_results) / total_indicators
-                if total_indicators > 0
-                else 0
-            )
-
-            # Composite score formula:
-            # - 40% from triggered signals ratio
-            # - 30% from average signal strength
-            # - 30% from fundamental score
-            signal_component = (triggered_count / max(total_indicators, 1)) * 40
-            strength_component = avg_signal_strength * 30
-            fundamental_component = (
-                (fundamental_score / fundamental_max) * 30 if fundamental_max > 0 else 0
-            )
-            composite_score = (
-                signal_component + strength_component + fundamental_component
-            )
-
-            # Remove duplicates while preserving order
-            seen = set()
-            unique_metrics = []
-            for m in metrics:
-                if m not in seen:
-                    seen.add(m)
-                    unique_metrics.append(m)
-
-            # Add composite score prominently
-            msg += f"\n⭐ score: {composite_score:.0f}/100\n"
-            msg += f"fundamental: {fundamental_score}/{fundamental_max}\n"
-
-            # Add key metrics
-            if unique_metrics:
-                msg += "\nmetrics:\n"
-                msg += "\n".join(unique_metrics)
-
-            # Add triggered signals
-            msg += f"\n\nsignals ({triggered_count}):\n"
-            if triggered_signals:
-                msg += "\n".join(triggered_signals)
-            else:
-                msg += "none triggered"
-
-            return twiml_response(msg)
-
-        except Exception as e:
-            logger.error(f"error fetching {symbol}: {e}", exc_info=True)
-            return twiml_response(f"could not find stock: {symbol.lower()}")
+        # Route everything through the AI agent
+        # The agent will decide what tools to use based on the message
+        logger.info(f"Processing with AI agent: {text}")
+        response = await ai_assistant.chat(
+            user_message=text,
+            user_phone=user_phone,
+            user_watchlist=user_watchlist,
+            db=db,
+        )
+        return twiml_response(response)
 
     except Exception as e:
         logger.error(f"error processing sms command: {e}", exc_info=True)

@@ -1,14 +1,16 @@
 # StockStalk
 
-A powerful, extensible stock monitoring application that watches stocks and sends real-time SMS notifications when indicators signal potential opportunities.
+A powerful, AI-powered stock monitoring application that watches stocks and sends intelligent SMS notifications with investment insights and recommendations.
 
 ## Features
 
+- **🤖 AI-Powered Assistant**: Natural language understanding via GPT-4o-mini - just text your questions!
+- **📊 Daily Digests**: Automated morning summaries of your watchlist with AI insights
+- **💡 Opportunity Discovery**: Scans VTI holdings to find investment opportunities you might be missing
 - **Technical Indicators**: RSI, MACD, Moving Average Crossover, Volume Spike Detection, and Price Change alerts
 - **Fundamental Indicators**: PEG Ratio, Debt-to-Equity, Operating Margins, ROIC, Free Cash Flow, Revenue Growth, Earnings Growth, and Fundamental Score
 - **Extensible Architecture**: Easily add custom indicators
-- **SMS Notifications**: AWS SNS integration for instant alerts with rate limiting and cooldowns
-- **Terminal Configuration UI**: Easy setup and management of watchlists
+- **SMS Notifications**: Twilio integration for instant alerts with rate limiting and cooldowns
 - **REST API**: Query stock analysis via HTTP endpoints (FastAPI)
 - **Async Architecture**: Built with async/await for efficient concurrent operations
 - **Strongly Typed**: Built with Pydantic for robust data validation
@@ -18,14 +20,69 @@ A powerful, extensible stock monitoring application that watches stocks and send
 ## Tech Stack
 
 - **Python 3.11+**: Modern Python with type hints
+- **OpenAI gpt-5-nano**: AI-powered natural language understanding
 - **Pydantic**: Data validation and settings management
 - **yfinance**: Real-time stock data from Yahoo Finance
 - **FastAPI**: Async REST API server
-- **AWS SNS**: SMS notifications via Amazon Simple Notification Service
+- **Twilio**: SMS notifications
 - **SQLAlchemy + aiosqlite**: Async database for alert tracking
 - **NumPy & Pandas**: Numerical analysis
+- **APScheduler**: Cron-style job scheduling for daily digests
 - **UV**: Fast Python package manager
 - **Docker**: Containerized deployment
+
+## 🤖 AI-Powered SMS Agent
+
+StockStalk includes a **true AI agent** that can execute actions on your behalf. It's like texting a smart financial advisor friend!
+
+### How It Works
+
+The AI agent has access to **9 tools** it can use to help you:
+
+| Tool                    | What it does                                   |
+| ----------------------- | ---------------------------------------------- |
+| `get_stock_quote`       | Quick price check for any stock                |
+| `analyze_stock`         | Deep analysis with indicators & recommendation |
+| `get_watchlist`         | See your tracked stocks                        |
+| `add_to_watchlist`      | Add stocks to track                            |
+| `remove_from_watchlist` | Stop tracking a stock                          |
+| `scan_opportunities`    | Find promising stocks from VTI holdings        |
+| `get_market_overview`   | Check SPY, QQQ, VTI indices                    |
+| `get_watchlist_summary` | Analyze all stocks you're tracking             |
+| `compare_stocks`        | Compare 2-4 stocks side by side                |
+
+### Just Text Naturally
+
+The AI decides which tools to use based on your message:
+
+- _"How's Apple doing today?"_ → Uses `get_stock_quote` for AAPL
+- _"Should I buy NVDA?"_ → Uses `analyze_stock` for deep analysis
+- _"Add Tesla and Microsoft to my list"_ → Uses `add_to_watchlist` twice
+- _"Compare AAPL, GOOGL, and MSFT"_ → Uses `compare_stocks`
+- _"What should I invest in?"_ → Uses `scan_opportunities`
+- _"How's my watchlist doing?"_ → Uses `get_watchlist_summary`
+- _"Check the market and then analyze my top performer"_ → Uses multiple tools in sequence
+
+### Multi-Step Requests
+
+The agent can handle complex, multi-step requests:
+
+> "Check out NVDA, and if it scores above 60, add it to my watchlist"
+
+The AI will:
+
+1. Call `analyze_stock` for NVDA
+2. Check the score
+3. Call `add_to_watchlist` if condition is met
+4. Respond with what it did
+
+### Daily Digest
+
+Every morning (configurable), you'll receive an AI-powered digest including:
+
+- 📈 Your watchlist performance summary
+- 💡 New opportunities from VTI holdings you might want to consider
+- 🎯 Actionable insights based on triggered indicators
 
 ## Installation
 
@@ -60,23 +117,34 @@ docker-compose up -d
 
 ## Quick Start
 
-### 1. Set Up AWS Credentials
+### 1. Set Up Environment Variables
 
-Create a `.env` file from the example:
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` with your AWS credentials:
+Create a `.env` file:
 
 ```bash
-AWS_ACCESS_KEY_ID=your_access_key
-AWS_SECRET_ACCESS_KEY=your_secret_key
-AWS_REGION=us-east-1
+# Twilio (required for SMS)
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_AUTH_TOKEN=your_auth_token
+TWILIO_PHONE_NUMBER=+14155551234
+
+# OpenAI (required for AI features)
+OPENAI_API_KEY=your_openai_api_key
+OPENAI_MODEL=gpt-5-nano  # default model
+
+# Daily Digest Schedule
+DAILY_DIGEST_ENABLED=true
+DAILY_DIGEST_HOUR=8          # 8 AM
+DAILY_DIGEST_MINUTE=0
+DAILY_DIGEST_TIMEZONE=America/New_York
+
+# Optional settings
+MIN_PRIORITY=medium
+COOLDOWN_MINUTES=60
+MAX_ALERTS_PER_HOUR=10
+CHECK_INTERVAL_MINUTES=60
 ```
 
-> **Note**: Your AWS account needs SNS permissions to send SMS messages. See [AWS SNS SMS documentation](https://docs.aws.amazon.com/sns/latest/dg/sns-mobile-phone-number-as-subscriber.html).
+> **Note**: Get your Twilio credentials from [twilio.com/console](https://twilio.com/console) and OpenAI API key from [platform.openai.com](https://platform.openai.com/api-keys).
 
 ### 2. Create Your Configuration
 
@@ -121,15 +189,37 @@ python -m stockstalk --configure
 ### 4. Run the Monitoring Service
 
 ```bash
-# Run continuous monitoring (default)
+# Run continuous monitoring with daily digests (default)
 python -m stockstalk
 
 # Run analysis once and exit
 python -m stockstalk --once
 
-# Run the API server
+# Run in dry-run mode (see what SMS would be sent without sending)
+python -m stockstalk --dry-run
+
+# Manually trigger daily digest for all users
+python -m stockstalk --digest
+
+# Send digest to a specific phone number
+python -m stockstalk --digest --phone +14155551234
+
+# Run the API server (with Twilio webhook for SMS)
 python -m stockstalk --server --port 8000
 ```
+
+### 5. Configure Twilio Webhook
+
+For SMS to work, configure your Twilio phone number's webhook:
+
+1. Go to [Twilio Console](https://console.twilio.com/) → Phone Numbers → Your Number
+2. Set the "A Message Comes In" webhook to:
+   ```
+   https://your-server.com/api/sms/webhook
+   ```
+3. Method: `POST`
+
+Now users can text your Twilio number to interact with StockStalk!
 
 ## Available Indicators
 
@@ -263,11 +353,28 @@ curl http://localhost:8000/health
 # Get stock analysis
 curl http://localhost:8000/api/stock/AAPL
 
+# Get quick quote
+curl http://localhost:8000/api/quote/AAPL
+
 # View watchlist
 curl http://localhost:8000/api/watchlist
 
+# Add to watchlist
+curl -X POST http://localhost:8000/api/watchlist \
+  -H "Content-Type: application/json" \
+  -d '{"symbol": "MSFT"}'
+
 # List available indicators
 curl http://localhost:8000/api/indicators
+
+# Find investment opportunities (scans VTI holdings)
+curl "http://localhost:8000/api/opportunities?top_n=50&min_score=50"
+
+# Send daily digest to a user
+curl -X POST http://localhost:8000/api/digest/+14155551234
+
+# Debug status (check settings, rate limits, etc.)
+curl http://localhost:8000/api/debug/status
 ```
 
 ## Configuration
