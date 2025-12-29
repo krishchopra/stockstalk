@@ -1,6 +1,4 @@
-"""Utilities package."""
+"""Utility functions and classes."""
 
-from stockstalk.utils.config import ConfigManager
-from stockstalk.utils.terminal_ui import TerminalUI
-
-__all__ = ["ConfigManager", "TerminalUI"]
+# Utils package - most functionality moved to stockstalk.settings
+__all__: list[str] = []

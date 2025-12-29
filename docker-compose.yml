@@ -7,20 +7,21 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./config.json:/app/config.json:ro
       - stockstalk_data:/app/data
       - ./logs:/app/logs
     env_file:
       - .env
     environment:
-      # AWS credentials (or use IAM role on EC2)
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
       # Twilio credentials
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
       - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+      # App settings (all have sensible defaults)
+      - MIN_PRIORITY=${MIN_PRIORITY:-medium}
+      - COOLDOWN_MINUTES=${COOLDOWN_MINUTES:-60}
+      - MAX_ALERTS_PER_HOUR=${MAX_ALERTS_PER_HOUR:-10}
+      - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-60}
+      - DATA_LOOKBACK_DAYS=${DATA_LOOKBACK_DAYS:-30}
     command: python -m stockstalk --server
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -37,18 +38,19 @@ services:
     profiles:
       - scheduler
     volumes:
-      - ./config.json:/app/config.json:ro
       - stockstalk_data:/app/data
       - ./logs:/app/logs
     env_file:
       - .env
     environment:
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
-      - AWS_REGION=${AWS_REGION:-us-east-1}
       - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
       - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
       - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
+      - MIN_PRIORITY=${MIN_PRIORITY:-medium}
+      - COOLDOWN_MINUTES=${COOLDOWN_MINUTES:-60}
+      - MAX_ALERTS_PER_HOUR=${MAX_ALERTS_PER_HOUR:-10}
+      - CHECK_INTERVAL_MINUTES=${CHECK_INTERVAL_MINUTES:-60}
+      - DATA_LOOKBACK_DAYS=${DATA_LOOKBACK_DAYS:-30}
     command: python -m stockstalk
     depends_on:
       - stockstalk

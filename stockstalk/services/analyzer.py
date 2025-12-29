@@ -21,9 +21,10 @@ from stockstalk.indicators import (
     RevenueGrowthIndicator,
     ROICIndicator,
 )
-from stockstalk.models import IndicatorResult, NotificationConfig, WatchlistItem
+from stockstalk.models import IndicatorResult, WatchlistItem
 from stockstalk.services.data_fetcher import StockDataFetcher
 from stockstalk.services.notifier import NotificationService
+from stockstalk.settings import settings
 from stockstalk.storage import get_database
 
 logger = logging.getLogger(__name__)
@@ -96,7 +97,6 @@ class StockAnalyzer:
         self,
         data_fetcher: StockDataFetcher,
         notifier: NotificationService,
-        notification_config: NotificationConfig,
         lookback_days: int = 30,
     ) -> None:
         """
@@ -105,13 +105,14 @@ class StockAnalyzer:
         Args:
             data_fetcher: Service for fetching stock data
             notifier: Service for sending notifications
-            notification_config: Configuration for notifications (cooldowns, etc.)
             lookback_days: Days of historical data to analyze
         """
         self.data_fetcher = data_fetcher
         self.notifier = notifier
-        self.notification_config = notification_config
         self.lookback_days = lookback_days
+        # Get settings from environment
+        self.cooldown_minutes = settings.COOLDOWN_MINUTES
+        self.max_alerts_per_hour = settings.MAX_ALERTS_PER_HOUR
 
     async def _should_send_alert(self, result: IndicatorResult) -> bool:
         """
@@ -133,21 +134,21 @@ class StockAnalyzer:
             recent_alert = await db.get_recent_alert(
                 symbol=result.symbol,
                 indicator=result.indicator_name,
-                cooldown_minutes=self.notification_config.cooldown_minutes,
+                cooldown_minutes=self.cooldown_minutes,
             )
 
             if recent_alert is not None:
                 logger.debug(
                     f"Skipping alert for {result.symbol}/{result.indicator_name} - "
-                    f"recent alert exists (cooldown: {self.notification_config.cooldown_minutes}m)"
+                    f"recent alert exists (cooldown: {self.cooldown_minutes}m)"
                 )
                 return False
 
             # Check hourly rate limit
             alerts_count = await db.get_alerts_count_since(minutes=60)
-            if alerts_count >= self.notification_config.max_alerts_per_hour:
+            if alerts_count >= self.max_alerts_per_hour:
                 logger.warning(
-                    f"Hourly alert limit reached ({alerts_count}/{self.notification_config.max_alerts_per_hour}), "
+                    f"Hourly alert limit reached ({alerts_count}/{self.max_alerts_per_hour}), "
                     f"skipping alert for {result.symbol}"
                 )
                 return False
@@ -159,9 +160,9 @@ class StockAnalyzer:
             # If DB is unavailable, allow the alert
             return True
 
-    async def _send_alert(self, result: IndicatorResult) -> bool:
+    async def _send_alert_to_watchers(self, result: IndicatorResult) -> bool:
         """
-        Send an alert and record it in the database.
+        Send an alert to all users watching this symbol and record it.
 
         Args:
             result: The indicator result to send
@@ -170,15 +171,23 @@ class StockAnalyzer:
             True if alert was sent successfully
         """
         try:
+            db = get_database()
+
+            # Get all users watching this symbol
+            watchers = await db.get_users_watching_symbol(result.symbol)
+
+            if not watchers:
+                logger.debug(f"No users watching {result.symbol}")
+                return False
+
             # Send notifications
-            send_results = await self.notifier.notify(result)
+            send_results = await self.notifier.send_notification_to_users(result, watchers)
 
             if not send_results:
                 logger.warning(f"No notifications sent for {result.symbol}")
                 return False
 
             # Record the alert in the database
-            db = get_database()
             sent_to = ",".join(send_results.keys())
 
             await db.add_alert(
@@ -242,7 +251,7 @@ class StockAnalyzer:
 
                     # Only send individual alerts if explicitly requested
                     if send_alerts and await self._should_send_alert(result):
-                        await self._send_alert(result)
+                        await self._send_alert_to_watchers(result)
 
                 except Exception as e:
                     logger.error(
@@ -285,7 +294,7 @@ class StockAnalyzer:
                 await self._send_digest(alerts_to_send, results)
             else:
                 for alert in alerts_to_send:
-                    await self._send_alert(alert)
+                    await self._send_alert_to_watchers(alert)
 
         return results
 
@@ -295,7 +304,7 @@ class StockAnalyzer:
         all_results_by_symbol: dict[str, list[IndicatorResult]] | None = None,
     ) -> bool:
         """
-        Send a consolidated digest of alerts and record them.
+        Send a consolidated digest of alerts to all relevant users.
 
         Args:
             results: List of triggered indicator results
@@ -305,20 +314,62 @@ class StockAnalyzer:
             True if digest was sent successfully
         """
         try:
-            # Send digest notification
-            send_results = await self.notifier.send_digest(
-                results, all_results_by_symbol=all_results_by_symbol
-            )
+            db = get_database()
 
-            if not send_results:
-                logger.warning("No digest notifications sent")
+            # Get all unique symbols in the digest
+            symbols = set(r.symbol for r in results)
+
+            # Build a map of symbol -> users watching
+            symbol_to_users: dict[str, set[str]] = {}
+            for symbol in symbols:
+                watchers = await db.get_users_watching_symbol(symbol)
+                symbol_to_users[symbol] = set(watchers)
+
+            # Get all users who should receive the digest (anyone watching any symbol)
+            all_watchers = set()
+            for watchers in symbol_to_users.values():
+                all_watchers.update(watchers)
+
+            if not all_watchers:
+                logger.warning("No users watching any of the triggered symbols")
                 return False
 
-            # Record all alerts in database
-            db = get_database()
-            sent_to = ",".join(send_results.keys())
+            # For each user, filter to only alerts for symbols they're watching
+            for phone_number in all_watchers:
+                user_symbols = set()
+                for symbol, watchers in symbol_to_users.items():
+                    if phone_number in watchers:
+                        user_symbols.add(symbol)
 
+                # Filter results to this user's watched symbols
+                user_results = [r for r in results if r.symbol in user_symbols]
+
+                if not user_results:
+                    continue
+
+                # Build filtered all_results_by_symbol for this user
+                user_all_results = {
+                    sym: res
+                    for sym, res in (all_results_by_symbol or {}).items()
+                    if sym in user_symbols
+                }
+
+                # Send digest to this user
+                send_results = await self.notifier.send_digest_to_users(
+                    user_results,
+                    [phone_number],
+                    all_results_by_symbol=user_all_results,
+                )
+
+                if send_results.get(phone_number):
+                    logger.info(f"Digest sent to {phone_number} with {len(user_results)} alerts")
+
+            # Record all alerts in database
             for result in results:
+                # Get watchers for this specific symbol
+                watchers = symbol_to_users.get(result.symbol, set())
+                sent_to = ",".join(watchers)
+
                 await db.add_alert(
                     symbol=result.symbol,
                     indicator=result.indicator_name,
@@ -327,13 +378,7 @@ class StockAnalyzer:
                     sent_to=sent_to,
                 )
 
-            success_count = sum(1 for success in send_results.values() if success)
-            logger.info(
-                f"Digest sent with {len(results)} alerts: "
-                f"{success_count}/{len(send_results)} delivered"
-            )
-
-            return success_count > 0
+            return True
 
         except Exception as e:
             logger.error(f"Error sending digest: {e}")

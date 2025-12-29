@@ -1,11 +1,11 @@
 """Notification service for sending alerts via Twilio SMS."""
 
 import logging
-import os
 
 import httpx
 
-from stockstalk.models import AlertPriority, IndicatorResult, NotificationConfig
+from stockstalk.models import AlertPriority, IndicatorResult
+from stockstalk.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -15,19 +15,14 @@ class NotificationService:
 
     TWILIO_API_URL = "https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json"
 
-    def __init__(self, config: NotificationConfig) -> None:
-        """
-        Initialize notification service.
+    def __init__(self) -> None:
+        """Initialize notification service using environment settings."""
+        self.account_sid = settings.TWILIO_ACCOUNT_SID
+        self.auth_token = settings.TWILIO_AUTH_TOKEN
+        self.from_number = settings.TWILIO_PHONE_NUMBER
+        self.min_priority = settings.MIN_PRIORITY
 
-        Args:
-            config: Notification configuration
-        """
-        self.config = config
-        self.account_sid = os.getenv("TWILIO_ACCOUNT_SID", "")
-        self.auth_token = os.getenv("TWILIO_AUTH_TOKEN", "")
-        self.from_number = os.getenv("TWILIO_PHONE_NUMBER", "")
-
-        if not all([self.account_sid, self.auth_token, self.from_number]):
+        if not settings.is_twilio_configured():
             logger.warning(
                 "Twilio credentials not fully configured. "
                 "Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER"
@@ -55,13 +50,11 @@ class NotificationService:
             AlertPriority.CRITICAL: 3,
         }
 
-        meets_threshold = (
-            priority_order[result.priority] >= priority_order[self.config.min_priority]
-        )
+        meets_threshold = priority_order[result.priority] >= priority_order[self.min_priority]
         if not meets_threshold:
             logger.info(
                 f"  {result.symbol}/{result.indicator_name}: priority {result.priority.value} "
-                f"< min threshold {self.config.min_priority.value}"
+                f"< min threshold {self.min_priority.value}"
             )
         return meets_threshold
 
@@ -76,7 +69,7 @@ class NotificationService:
         Returns:
             True if message was sent successfully
         """
-        if not all([self.account_sid, self.auth_token, self.from_number]):
+        if not settings.is_twilio_configured():
             logger.error("twilio credentials not configured")
             return False
 
@@ -113,12 +106,15 @@ class NotificationService:
             logger.error(f"failed to send sms to {phone_number}: {e}", exc_info=True)
             return False
 
-    async def send_notification(self, result: IndicatorResult) -> dict[str, bool]:
+    async def send_notification_to_users(
+        self, result: IndicatorResult, phone_numbers: list[str]
+    ) -> dict[str, bool]:
         """
-        Send SMS notifications to all configured phone numbers.
+        Send SMS notifications to specific phone numbers.
 
         Args:
             result: Indicator result to send
+            phone_numbers: List of phone numbers to notify
 
         Returns:
             Dict mapping phone numbers to success status
@@ -132,15 +128,15 @@ class NotificationService:
             )
             return results
 
-        if not self.config.phone_numbers:
-            logger.warning("no phone numbers configured for notifications")
+        if not phone_numbers:
+            logger.warning("no phone numbers provided for notification")
             return results
 
         # Format the message
         message = self._format_message(result)
 
         # Send to all phone numbers
-        for phone_number in self.config.phone_numbers:
+        for phone_number in phone_numbers:
             success = await self.send_sms(phone_number, message)
             results[phone_number] = success
 
@@ -157,18 +153,6 @@ class NotificationService:
         prefix = priority_label.get(result.priority, "")
         return f"{prefix}{result.symbol}: {result.message}".lower()
 
-    async def notify(self, result: IndicatorResult) -> dict[str, bool]:
-        """
-        Send notifications via all configured channels.
-
-        Args:
-            result: Indicator result to send
-
-        Returns:
-            Dict mapping phone numbers to success status
-        """
-        return await self.send_notification(result)
-
     async def send_test_message(self, phone_number: str) -> bool:
         """
         Send a test SMS to verify configuration.
@@ -184,17 +168,19 @@ class NotificationService:
             "stockstalk test - notifications are working",
         )
 
-    async def send_digest(
+    async def send_digest_to_users(
         self,
         results: list[IndicatorResult],
+        phone_numbers: list[str],
         max_alerts: int = 10,
         all_results_by_symbol: dict[str, list[IndicatorResult]] | None = None,
     ) -> dict[str, bool]:
         """
-        Send a consolidated digest of top alerts in one SMS.
+        Send a consolidated digest of top alerts to specific users.
 
         Args:
             results: List of indicator results to include in digest
+            phone_numbers: Phone numbers to send digest to
             max_alerts: Maximum number of alerts to include (default: 10)
             all_results_by_symbol: All results grouped by symbol (for showing triggered/total)
 
@@ -208,8 +194,8 @@ class NotificationService:
             logger.info("no alerts meet notification threshold for digest")
             return {}
 
-        if not self.config.phone_numbers:
-            logger.warning("no phone numbers configured for notifications")
+        if not phone_numbers:
+            logger.warning("no phone numbers provided for digest")
             return {}
 
         # Sort by priority (CRITICAL > HIGH > MEDIUM) and signal strength
@@ -233,7 +219,7 @@ class NotificationService:
 
         # Send to all phone numbers
         send_results: dict[str, bool] = {}
-        for phone_number in self.config.phone_numbers:
+        for phone_number in phone_numbers:
             success = await self.send_sms(phone_number, message)
             send_results[phone_number] = success
 
@@ -252,21 +238,37 @@ class NotificationService:
         # Build compact message
         lines = ["stockstalk alerts:"]
 
-        for symbol, symbol_results in all_results_by_symbol.items():
-            # Get highest priority for this symbol
-            priorities = [r.priority for r in symbol_results]
-            if AlertPriority.CRITICAL in priorities:
-                prefix = "[!!] "
-            elif AlertPriority.HIGH in priorities:
-                prefix = "[!] "
-            else:
-                prefix = ""
+        if all_results_by_symbol:
+            for symbol, symbol_results in all_results_by_symbol.items():
+                # Only include symbols with triggered alerts
+                triggered_results = [r for r in symbol_results if r.is_triggered]
+                if not triggered_results:
+                    continue
 
-            # Summarize indicators
-            indicators = [r.indicator_name.replace("_", " ") for r in symbol_results]
-            lines.append(f"{prefix}{symbol}: {', '.join(indicators)}")
+                # Get highest priority for this symbol
+                priorities = [r.priority for r in triggered_results]
+                if AlertPriority.CRITICAL in priorities:
+                    prefix = "[!!] "
+                elif AlertPriority.HIGH in priorities:
+                    prefix = "[!] "
+                else:
+                    prefix = ""
+
+                # Summarize indicators
+                indicators = [r.indicator_name.replace("_", " ") for r in triggered_results]
+                lines.append(f"{prefix}{symbol}: {', '.join(indicators)}")
+        else:
+            # Fallback if no grouped results provided
+            by_symbol: dict[str, list[str]] = {}
+            for r in results:
+                if r.symbol not in by_symbol:
+                    by_symbol[r.symbol] = []
+                by_symbol[r.symbol].append(r.indicator_name.replace("_", " "))
+
+            for symbol, indicators in by_symbol.items():
+                lines.append(f"{symbol}: {', '.join(indicators)}")
 
         # Add count summary
-        lines.append(f"total: {len(results)} signals, {len(all_results_by_symbol)} stocks")
+        lines.append(f"total: {total_count} signals")
 
         return "\n".join(lines).lower()
