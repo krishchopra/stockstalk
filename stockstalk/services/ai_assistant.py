@@ -1,7 +1,6 @@
 """AI-powered investment assistant using OpenAI gpt-5-mini with function calling."""
 
 import asyncio
-import html
 import json
 import logging
 import re
@@ -9,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-import httpx
 from openai import OpenAI
 
 from stockstalk.models import WatchlistItem
@@ -513,167 +511,58 @@ class AIAssistant:
 
     async def _tool_web_search(self, query: str) -> dict[str, Any]:
         """Search the web using DuckDuckGo."""
+        from duckduckgo_search import DDGS
+
         try:
             logger.info(f"Web search query: {query}")
 
-            # Enhance query for recent news if it's a news query
-            query_lower = query.lower()
-            if any(
-                word in query_lower for word in ["news", "article", "report", "update"]
-            ):
-                # Add recency terms if not already present
-                if not any(
-                    word in query_lower
-                    for word in [
-                        "recent",
-                        "latest",
-                        "today",
-                        "this week",
-                        "this month",
-                        "2025",
-                    ]
-                ):
-                    query = f"{query} recent"
-                    logger.info(f"Enhanced query: {query}")
-
-            # Use DuckDuckGo's HTML search (no API key needed)
-            # Add time filter parameter for recent results (df=w means "past week")
-            # Use more realistic headers to avoid bot detection
-            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-                response = await client.get(
-                    "https://html.duckduckgo.com/html/",
-                    params={"q": query, "df": "w"},
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.5",
-                        "DNT": "1",
-                        "Connection": "keep-alive",
-                        "Upgrade-Insecure-Requests": "1",
-                    },
-                )
-
-                logger.info(f"DuckDuckGo response status: {response.status_code}")
-
-                # Handle 202 (Accepted) - DuckDuckGo might be rate limiting or bot detecting
-                if response.status_code == 202:
-                    # Try to parse anyway - sometimes 202 still returns HTML
-                    if "result" in response.text.lower() or len(response.text) > 1000:
-                        logger.info("Got 202 but HTML looks valid, attempting to parse")
-                        # Continue with parsing
+            # Run the synchronous DDGS search in a thread pool
+            def do_search() -> list[dict[str, str]]:
+                with DDGS() as ddgs:
+                    # Use news search for news-related queries, otherwise text search
+                    query_lower = query.lower()
+                    if any(
+                        word in query_lower
+                        for word in ["news", "latest", "today", "recent"]
+                    ):
+                        results = list(ddgs.news(query, max_results=5))
                     else:
-                        logger.warning(
-                            "DuckDuckGo returned 202 with minimal content - likely rate limited"
-                        )
-                        return {
-                            "message": "search temporarily unavailable (rate limited). try again in a moment.\n\n[debug: DDG status 202 - rate limit/bot detection]"
-                        }
-                elif response.status_code != 200:
-                    error_preview = (
-                        response.text[:150] if response.text else "no response body"
-                    )
-                    logger.error(
-                        f"DuckDuckGo returned status {response.status_code}: {error_preview}"
-                    )
-                    return {
-                        "message": f"search failed: HTTP {response.status_code}\n\n[debug: DDG status {response.status_code}, body: {error_preview[:50]}...]"
-                    }
+                        results = list(ddgs.text(query, max_results=5))
+                    return results
 
-                # Parse the HTML response for search results
-                html = response.text
-                logger.debug(f"HTML response length: {len(html)} chars")
-                results = []
+            results = await asyncio.to_thread(do_search)
+            logger.info(f"Found {len(results)} search results")
 
-                # Try multiple parsing strategies for DuckDuckGo
-                # Strategy 1: Look for result links and snippets
-                result_pattern = re.compile(
-                    r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([^<]*)</a>',
-                    re.IGNORECASE | re.DOTALL,
-                )
-                title_matches = result_pattern.findall(html)
+            if not results:
+                return {
+                    "message": f"no results found for '{query}'. try a different search."
+                }
 
-                # Strategy 2: Look for snippets
-                snippet_pattern = re.compile(
-                    r'<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([^<]+)</a>',
-                    re.IGNORECASE | re.DOTALL,
-                )
-                snippet_matches = snippet_pattern.findall(html)
+            # Format results into a readable message
+            lines = []
+            for i, result in enumerate(results, 1):
+                title = result.get("title", "Result")
+                # News results use 'body', text results use 'body' or 'snippet'
+                snippet = result.get("body", result.get("snippet", ""))
+                url = result.get("url", result.get("href", ""))
+                lines.append(f"{i}. {title}")
+                if snippet:
+                    lines.append(f"   {snippet[:200]}")
+                if url:
+                    lines.append(f"   {url}")
+                if i < len(results):
+                    lines.append("")  # Blank line between results
 
-                # Strategy 3: Look for any result divs
-                if not title_matches:
-                    result_div_pattern = re.compile(
-                        r'<div[^>]*class="[^"]*result[^"]*"[^>]*>.*?<a[^>]*href="([^"]*)"[^>]*>([^<]*)</a>',
-                        re.IGNORECASE | re.DOTALL,
-                    )
-                    title_matches = result_div_pattern.findall(html)
-
-                # Combine results
-                for i, (url, title) in enumerate(title_matches[:5]):
-                    snippet = snippet_matches[i] if i < len(snippet_matches) else ""
-                    if title.strip():
-                        results.append(
-                            {
-                                "title": title.strip(),
-                                "snippet": snippet.strip()[:200] if snippet else "",
-                                "url": url
-                                if url.startswith("http")
-                                else f"https://{url}",
-                            }
-                        )
-
-                logger.info(f"Found {len(results)} search results")
-
-                # Debug: log if no results found
-                if not results:
-                    logger.warning(
-                        f"No results parsed from HTML. HTML length: {len(html)}, first 500 chars: {html[:500]}"
-                    )
-                    return {
-                        "message": f"no results found for '{query}'. try a different search.\n\n[debug: parsed 0 results from {len(html)} char HTML, status {response.status_code}]"
-                    }
-
-                if results:
-                    # Format results into a readable message
-                    lines = []
-                    for i, result in enumerate(results, 1):
-                        title = html.unescape(result.get("title", "Result"))
-                        snippet = html.unescape(result.get("snippet", ""))
-                        url = result.get("url", "")
-                        lines.append(f"{i}. {title}")
-                        if snippet:
-                            lines.append(f"   {snippet}")
-                        if url:
-                            lines.append(f"   {url}")
-                        if i < len(results):
-                            lines.append("")  # Blank line between results
-
-                    return {
-                        "message": "\n".join(lines),
-                        "results": results,  # Keep structured data for reference
-                    }
-                else:
-                    return {
-                        "message": f"no results found for '{query}'. try a different search.",
-                    }
-
-        except httpx.TimeoutException:
-            logger.error("Web search timed out")
             return {
-                "message": "search timed out. try again with a simpler query.\n\n[debug: timeout after 10s]"
+                "message": "\n".join(lines),
+                "results": results,
             }
-        except httpx.RequestError as e:
-            logger.error(f"Web search request error: {e}", exc_info=True)
-            error_msg = str(e)[:100]  # Truncate long errors
-            return {
-                "message": f"search request failed: {error_msg}\n\n[debug: httpx request error]"
-            }
+
         except Exception as e:
             logger.error(f"Web search error: {e}", exc_info=True)
             error_type = type(e).__name__
             error_msg = str(e)[:100]
-            return {
-                "message": f"search failed: {error_type}: {error_msg}\n\n[debug: exception in web_search]"
-            }
+            return {"message": f"search failed: {error_type}: {error_msg}"}
 
     # =========================================================================
     # Tool Execution Engine

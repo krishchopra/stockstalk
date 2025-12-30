@@ -22,6 +22,8 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.25",
     # Scheduler
     "apscheduler>=3.10.4",
+    # Web search
+    "duckduckgo-search>=7.0.0",
 ]
 
 [project.optional-dependencies]
