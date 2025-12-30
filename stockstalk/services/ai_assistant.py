@@ -171,19 +171,7 @@ TOOLS = [
         },
     },
     {
-        "type": "function",
-        "name": "web_search",
-        "description": "Search the web for current news, information, or anything else. Use this when the user asks about recent events, news, or anything you don't have data for. IMPORTANT: For news queries, always include words like 'recent', 'latest', 'today', or 'this week' to get current results.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "query": {
-                    "type": "string",
-                    "description": "The search query. For news, include 'recent', 'latest', 'today', or 'this week' (e.g., 'latest AAPL earnings news', 'recent tech sector news today', 'tech news this week')",
-                }
-            },
-            "required": ["query"],
-        },
+        "type": "web_search",
     },
 ]
 
@@ -202,6 +190,8 @@ important:
 - if someone's just chatting (like "hey what's up" or "how are you"), just respond naturally without tools
 - you have conversation context from previous messages, so you can reference things you talked about before
 - use web_search for news, recent events, or anything you need to look up
+- when user asks for general news (like "tech news"), search for general topics - don't automatically include their watchlist stocks unless they specifically ask about their stocks
+- if they ask "news about my stocks" or "what's happening with my watchlist", then include those specific stocks in the search
 
 CRITICAL: when tools return results, they may include a "message" field with formatted text. ALWAYS extract and use the "message" field from tool results - never output raw JSON. if a tool returns {"message": "some text"}, you should respond with "some text" (formatted nicely), not the JSON itself.
 
@@ -536,17 +526,37 @@ class AIAssistant:
 
             # Use DuckDuckGo's HTML search (no API key needed)
             # Add time filter parameter for recent results (df=w means "past week")
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            # Use more realistic headers to avoid bot detection
+            async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
                 response = await client.get(
                     "https://html.duckduckgo.com/html/",
                     params={"q": query, "df": "w"},
                     headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.5",
+                        "DNT": "1",
+                        "Connection": "keep-alive",
+                        "Upgrade-Insecure-Requests": "1",
                     },
                 )
 
                 logger.info(f"DuckDuckGo response status: {response.status_code}")
-                if response.status_code != 200:
+
+                # Handle 202 (Accepted) - DuckDuckGo might be rate limiting or bot detecting
+                if response.status_code == 202:
+                    # Try to parse anyway - sometimes 202 still returns HTML
+                    if "result" in response.text.lower() or len(response.text) > 1000:
+                        logger.info("Got 202 but HTML looks valid, attempting to parse")
+                        # Continue with parsing
+                    else:
+                        logger.warning(
+                            "DuckDuckGo returned 202 with minimal content - likely rate limited"
+                        )
+                        return {
+                            "message": "search temporarily unavailable (rate limited). try again in a moment.\n\n[debug: DDG status 202 - rate limit/bot detection]"
+                        }
+                elif response.status_code != 200:
                     error_preview = (
                         response.text[:150] if response.text else "no response body"
                     )
@@ -683,7 +693,6 @@ class AIAssistant:
             "compare_stocks": lambda: self._tool_compare_stocks(
                 arguments.get("symbols", [])
             ),
-            "web_search": lambda: self._tool_web_search(arguments.get("query", "")),
         }
 
         if tool_name not in tool_map:
@@ -884,7 +893,15 @@ class AIAssistant:
                             ):
                                 item_type = "message"
 
-                        if item_type == "function_call":
+                        # Handle OpenAI's built-in web_search tool
+                        if item_type == "web_search_call":
+                            # OpenAI handles web_search internally - just continue to get the result
+                            logger.info(
+                                "OpenAI web_search_call detected - waiting for result"
+                            )
+                            # Don't add to tool_calls, just let the loop continue
+                            continue
+                        elif item_type == "function_call":
                             tool_calls.append(item)
                         elif item_type == "message":
                             text_outputs.append(item)
@@ -1641,4 +1658,6 @@ class AIAssistant:
 
 
 # Backwards compatibility - keep old method name
+AIAssistant.process_natural_language = AIAssistant.chat
+
 AIAssistant.process_natural_language = AIAssistant.chat
