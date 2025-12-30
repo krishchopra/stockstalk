@@ -171,7 +171,19 @@ TOOLS = [
         },
     },
     {
-        "type": "web_search",
+        "type": "function",
+        "name": "web_search",
+        "description": "Search the web for news, articles, recent events, or any information about a topic. Use this for news queries, current events, or anything that requires up-to-date information.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The search query (e.g., 'tech news', 'AAPL recent news', 'stock market today')",
+                }
+            },
+            "required": ["query"],
+        },
     },
 ]
 
@@ -693,6 +705,7 @@ class AIAssistant:
             "compare_stocks": lambda: self._tool_compare_stocks(
                 arguments.get("symbols", [])
             ),
+            "web_search": lambda: self._tool_web_search(arguments.get("query", "")),
         }
 
         if tool_name not in tool_map:
@@ -893,15 +906,7 @@ class AIAssistant:
                             ):
                                 item_type = "message"
 
-                        # Handle OpenAI's built-in web_search tool
-                        if item_type == "web_search_call":
-                            # OpenAI handles web_search internally - just continue to get the result
-                            logger.info(
-                                "OpenAI web_search_call detected - waiting for result"
-                            )
-                            # Don't add to tool_calls, just let the loop continue
-                            continue
-                        elif item_type == "function_call":
+                        if item_type == "function_call":
                             tool_calls.append(item)
                         elif item_type == "message":
                             text_outputs.append(item)
